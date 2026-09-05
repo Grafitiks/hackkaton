@@ -16,7 +16,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
   
   <!-- Custom Styles -->
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260905_modalfix">
   
   <!-- Chart.js & Zoom Plugin -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -44,13 +44,52 @@
 
     <div class="header-controls">
       <div class="control-item">
-        <label><i class="fa-solid fa-map-pin"></i> Сохраненные поля:</label>
+        <label><i class="fa-solid fa-layer-group"></i> Группы:</label>
+        <div class="select-with-btn">
+          <select id="regionSelect" class="form-select" title="Выбор группы полей или аграрного региона">
+            <option value="" disabled selected>— Выберите группу или регион —</option>
+            <optgroup id="customGroupsOptgroup" label="📁 Мои группы полей">
+              <!-- Сюда динамически добавляются созданные пользователем группы полей -->
+            </optgroup>
+            <optgroup label="Аграрные регионы РФ">
+              <option value="samara">Самарская область (Поволжье)</option>
+              <option value="krasnodar">Краснодарский край (Кубань)</option>
+              <option value="rostov">Ростовская область (Дон)</option>
+              <option value="voronezh">Воронежская область (Черноземье)</option>
+              <option value="stavropol">Ставропольский край (Кавказ)</option>
+              <option value="altay">Алтайский край (Сибирь)</option>
+              <option value="tatarstan">Республика Татарстан</option>
+              <option value="belgorod">Белгородская область</option>
+              <option value="saratov">Саратовская область</option>
+              <option value="orenburg">Оренбургская область</option>
+            </optgroup>
+          </select>
+          <button id="createGroupBtn" class="btn-icon-control" title="Создать свою группу полей (хозяйство / кластер)">
+            <i class="fa-solid fa-folder-plus"></i>
+          </button>
+          <button id="deleteGroupBtn" class="btn-icon-control btn-delete-danger" title="Удалить активную группу полей" disabled>
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+          <button id="regionSummaryBtn" class="btn-icon-control" title="Сводный агроклиматический отчет по выбранному региону">
+            <i class="fa-solid fa-chart-pie"></i>
+          </button>
+          <button id="searchRegionBtn" class="btn-icon-control" title="Глобальный поиск любого региона или района на карте">
+            <i class="fa-solid fa-magnifying-glass-location"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="control-item">
+        <label id="polygonSelectLabel"><i class="fa-solid fa-map-pin"></i> Поля группы:</label>
         <div class="select-with-btn">
           <select id="polygonSelect" class="form-select">
-            <option value="" disabled selected>— Нет полей (нарисуйте на карте или найдите в OSM) —</option>
+            <option value="" disabled selected>— Нет полей (выберите группу или нарисуйте на карте) —</option>
           </select>
           <button id="editFieldBtn" class="btn-icon-control" title="Настроить название и цвет активного поля" disabled>
             <i class="fa-solid fa-palette"></i>
+          </button>
+          <button id="deleteFieldBtn" class="btn-icon-control btn-delete-danger" title="Удалить активное поле" disabled>
+            <i class="fa-solid fa-trash-can"></i>
           </button>
         </div>
       </div>
@@ -58,9 +97,10 @@
       <div class="control-item date-range-control">
         <label><i class="fa-regular fa-calendar-days"></i> Период дат:</label>
         <div class="date-range-group">
-          <input type="text" id="startDateInput" class="form-date-input" placeholder="ГГГГ-ММ-ДД" title="Начальная дата (введите с клавиатуры или выберите в календаре)" value="2026-01-01" maxlength="10">
+          <!-- Поля ввода дат в российском агрономическом формате ДД.ММ.ГГГГ с поддержкой клавиатуры и календаря -->
+          <input type="text" id="startDateInput" class="form-date-input" placeholder="ДД.ММ.ГГГГ" title="Начальная дата (введите с клавиатуры ДД.ММ.ГГГГ или выберите в календаре)" value="01.01.2026" maxlength="10">
           <span class="date-sep">—</span>
-          <input type="text" id="endDateInput" class="form-date-input" placeholder="ГГГГ-ММ-ДД" title="Конечная дата (введите с клавиатуры или выберите в календаре)" value="2026-09-05" maxlength="10">
+          <input type="text" id="endDateInput" class="form-date-input" placeholder="ДД.ММ.ГГГГ" title="Конечная дата (введите с клавиатуры ДД.ММ.ГГГГ или выберите в календаре)" value="05.09.2026" maxlength="10">
           <button id="applyDateBtn" class="btn-icon-control btn-apply-dates" title="Применить даты и обновить спутниковый анализ">
             <i class="fa-solid fa-arrow-rotate-right"></i>
           </button>
@@ -404,9 +444,12 @@
           </div>
         </div>
 
-        <div class="modal-actions" style="margin-top: 8px; justify-content: flex-end; gap: 10px;">
-          <button id="cancelFieldModalBtn" class="btn btn-secondary">Отмена</button>
-          <button id="saveFieldModalBtn" class="btn btn-primary"><i class="fa-solid fa-check"></i> Сохранить поле</button>
+        <div class="modal-actions" style="margin-top: 8px; display: flex; justify-content: space-between; gap: 10px;">
+          <button id="deleteFieldModalBtn" class="btn btn-danger" style="display: none;"><i class="fa-solid fa-trash-can"></i> Удалить поле</button>
+          <div style="display: flex; gap: 10px; margin-left: auto;">
+            <button id="cancelFieldModalBtn" class="btn btn-secondary">Отмена</button>
+            <button id="saveFieldModalBtn" class="btn btn-primary"><i class="fa-solid fa-check"></i> Сохранить поле</button>
+          </div>
         </div>
       </div>
     </div>
@@ -452,6 +495,7 @@
             <div class="doc-header-meta">
               <div class="doc-meta-item"><span>Рег. номер:</span> <strong id="docRegNumber">PASSPORT-2026-001</strong></div>
               <div class="doc-meta-item"><span>Дата выпуска:</span> <strong id="docGeneratedAt">--</strong></div>
+              <div class="doc-meta-item"><span>Период отчета (календарь):</span> <strong id="docCalendarPeriodHeader">с -- по --</strong></div>
               <div class="doc-meta-item"><span>Статус ДЗЗ:</span> <span class="doc-status-pill ok">GEE ВЕРИФИЦИРОВАНО</span></div>
             </div>
           </div>
@@ -477,7 +521,7 @@
                 <strong class="cell-value" id="docCentroid">--</strong>
               </div>
               <div class="doc-grid-cell">
-                <span class="cell-label">Анализируемый период:</span>
+                <span class="cell-label">Календарный период мониторинга:</span>
                 <strong class="cell-value" id="docPeriod">--</strong>
               </div>
               <div class="doc-grid-cell">
@@ -554,11 +598,128 @@
     </div>
   </div>
 
+  <!-- Regional Summary & Agrometeorology Modal -->
+  <div id="regionSummaryModal" class="modal-backdrop hidden">
+    <div class="modal-card region-summary-modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-earth-europe"></i> <span id="regModalTitle">Агроклиматическая сводка региона</span>
+        </div>
+        <button id="closeRegionModalBtn" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="region-meta-banner">
+          <div class="region-meta-item">
+            <span class="region-meta-label">Макрорегион:</span>
+            <span id="regMacroRegion" class="region-meta-val">--</span>
+          </div>
+          <div class="region-meta-item">
+            <span class="region-meta-label">Природно-климатическая зона:</span>
+            <span id="regClimateZone" class="region-meta-val">--</span>
+          </div>
+          <div class="region-meta-item">
+            <span class="region-meta-label">Доминирующие с/х культуры:</span>
+            <span id="regDominantCrops" class="region-meta-val highlight-cyan">--</span>
+          </div>
+        </div>
+        <div id="regGroupNotesBanner" class="region-notes-banner hidden" style="margin-top: 10px; padding: 10px 14px; background: rgba(0, 240, 255, 0.08); border-left: 3px solid var(--accent-cyan); border-radius: 6px; font-size: 13px; color: var(--text-primary);">
+          <i class="fa-solid fa-note-sticky text-cyan" style="margin-right: 6px;"></i>
+          <strong>Примечание к группе:</strong> <span id="regGroupNotesText" style="color: var(--text-secondary); margin-left: 4px;">—</span>
+        </div>
+
+        <div class="region-kpi-grid">
+          <div class="region-kpi-card">
+            <div class="region-kpi-title">Средняя температура</div>
+            <div id="regMeanTemp" class="region-kpi-value text-amber">-- °C</div>
+            <div id="regMaxTemp" class="region-kpi-sub">Макс: -- °C</div>
+          </div>
+          <div class="region-kpi-card">
+            <div class="region-kpi-title">Сумма осадков</div>
+            <div id="regPrecip" class="region-kpi-value highlight-cyan">-- мм</div>
+            <div class="region-kpi-sub">ECMWF ERA5 Reanalysis</div>
+          </div>
+          <div class="region-kpi-card">
+            <div class="region-kpi-title">ГТК Селянинова</div>
+            <div id="regGtk" class="region-kpi-value">--</div>
+            <div id="regMoistureStatus" class="region-kpi-sub">--</div>
+          </div>
+          <div class="region-kpi-card">
+            <div class="region-kpi-title">Уровень риска</div>
+            <div id="regRiskLevel" class="region-kpi-value">--</div>
+            <div id="regDiscoveredFields" class="region-kpi-sub">Найдено полей: --</div>
+          </div>
+        </div>
+
+        <div class="region-actions-row">
+          <button id="regExploreFieldsBtn" class="btn btn-primary">
+            <i class="fa-solid fa-satellite"></i> Исследовать поля региона на карте
+          </button>
+          <button id="regCloseBtn" class="btn btn-secondary">
+            Закрыть
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Region Geocoder Search Modal -->
+  <div id="customRegionModal" class="modal-backdrop hidden">
+    <div class="modal-card custom-region-modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-magnifying-glass-location"></i> <span>Поиск любого региона или района</span>
+        </div>
+        <button id="closeCustomRegBtn" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc" style="color: var(--text-secondary); margin-bottom: 12px; font-size: 13px;">Введите название области, края, аграрного района или города. Система выполнит геокодинг, перенесет карту и найдет с/х угодья:</p>
+        <div class="geocode-search-row">
+          <input type="text" id="geocodeInput" class="form-input" placeholder="Например: Тамбовская область, Алтайский край, Канзас..." style="flex: 1;" />
+          <button id="doGeocodeBtn" class="btn btn-primary">
+            <i class="fa-solid fa-search"></i> Найти
+          </button>
+        </div>
+        <div id="geocodeResultsList" class="geocode-results-list" style="margin-top: 14px; max-height: 220px; overflow-y: auto;">
+          <!-- Dynamically inserted search results -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Creating a Custom Field Group in Region Category -->
+  <div id="groupModal" class="modal-backdrop hidden">
+    <div class="modal-card" style="max-width: 480px; width: 90%;">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-folder-plus text-cyan"></i> <span>Создать группу полей</span>
+        </div>
+        <button id="closeGroupModalBtn" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc" style="color: var(--text-secondary); margin-bottom: 14px; font-size: 13px;">
+          Созданная группа полей появится в категории <strong>«Группы»</strong>. Вы сможете объединить свои поля (по хозяйству, севообороту или кластеру) и переключаться между ними:
+        </p>
+        <div class="form-group-modal" style="margin-bottom: 14px;">
+          <label class="modal-label"><i class="fa-solid fa-tag"></i> Название группы / хозяйства:</label>
+          <input type="text" id="groupNameInput" class="modal-input" placeholder="Например: КФХ Нива, Агрохолдинг Заря, Участок Север" maxlength="50" style="width: 100%; box-sizing: border-box;" />
+        </div>
+        <div class="form-group-modal" style="margin-bottom: 14px;">
+          <label class="modal-label"><i class="fa-solid fa-circle-info"></i> Примечание (необязательно):</label>
+          <input type="text" id="groupDescInput" class="modal-input" placeholder="Например: Севооборот 2026, Озимая пшеница" maxlength="80" style="width: 100%; box-sizing: border-box;" />
+        </div>
+        <div class="modal-actions" style="margin-top: 18px; display: flex; justify-content: flex-end; gap: 10px;">
+          <button id="cancelGroupModalBtn" class="btn btn-secondary">Отмена</button>
+          <button id="saveGroupModalBtn" class="btn btn-primary"><i class="fa-solid fa-check"></i> Создать группу</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Leaflet JS & Leaflet Draw -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
   
   <!-- Main Application Script -->
-  <script src="app.js"></script>
+  <script src="app.js?v=20260905_customgroups"></script>
 </body>
 </html>

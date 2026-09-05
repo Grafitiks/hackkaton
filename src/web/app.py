@@ -16,11 +16,13 @@ from typing import List, Dict, Any, Optional, Tuple
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(BASE_DIR)
 
+import requests
 from src.anomalies.detector import compute_zscores, classify_status, detect_anomaly_intervals
 from src.anomalies.interpreter import generate_full_report
 from src.features.feature_builder import enrich_weather, extract_gap_features, FEATURE_COLUMNS
 from src.data_fetchers.osm_farmland import fetch_osm_farmland_polygons
 from src.data_fetchers.gee_fetcher import get_available_years, get_current_year, is_gee_available
+from src.data_fetchers.weather_api import fetch_real_weather
 
 app = FastAPI(
     title="Космохакатон: Мониторинг вегетационной динамики с/х территорий",
@@ -114,6 +116,298 @@ def get_osm_farmlands(
         "features": features
     }
 
+# ============================================================================
+# РЕГИОНАЛЬНЫЙ АГРОМОНИТОРИНГ (КРИТЕРИЙ: АДАПТИВНОСТЬ ПОД МНОЖЕСТВЕННЫЕ РЕГИОНЫ)
+# Обеспечивает возможность анализа любого аграрного региона России и мира,
+# автоматический поиск доступных с/х полей при выборе региона и региональную метеоаналитику.
+# ============================================================================
+
+REGIONS_CATALOG: Dict[str, Dict[str, Any]] = {
+    "samara": {
+        "id": "samara",
+        "name": "Самарская область",
+        "macro_region": "Среднее Поволжье",
+        "climate_zone": "Умеренно-континентальная (лесостепь / степь)",
+        "dominant_crops": ["озимая пшеница", "подсолнечник", "ячмень"],
+        "center_lat": 53.25,
+        "center_lon": 50.25,
+        "zoom": 11,
+        "bbox": [50.0, 53.05, 50.5, 53.4]
+    },
+    "krasnodar": {
+        "id": "krasnodar",
+        "name": "Краснодарский край (Кубань)",
+        "macro_region": "Северный Кавказ / Юг России",
+        "climate_zone": "Умеренно-теплая (высокоплодородные выщелоченные черноземы)",
+        "dominant_crops": ["озимая пшеница", "кукуруза", "подсолнечник", "соя"],
+        "center_lat": 45.35,
+        "center_lon": 39.20,
+        "zoom": 11,
+        "bbox": [39.0, 45.2, 39.45, 45.5]
+    },
+    "rostov": {
+        "id": "rostov",
+        "name": "Ростовская область",
+        "macro_region": "Нижний Дон / Южный агропояс",
+        "climate_zone": "Засушливая степь (риск суховеев и гидротермического стресса)",
+        "dominant_crops": ["озимая пшеница", "подсолнечник", "зернобобовые"],
+        "center_lat": 47.45,
+        "center_lon": 40.15,
+        "zoom": 11,
+        "bbox": [39.9, 47.3, 40.4, 47.6]
+    },
+    "voronezh": {
+        "id": "voronezh",
+        "name": "Воронежская область",
+        "macro_region": "Центральное Черноземье",
+        "climate_zone": "Типичное Черноземье (благоприятное увлажнение)",
+        "dominant_crops": ["озимая пшеница", "сахарная свекла", "ячмень"],
+        "center_lat": 51.55,
+        "center_lon": 39.40,
+        "zoom": 11,
+        "bbox": [39.15, 51.4, 39.65, 51.7]
+    },
+    "stavropol": {
+        "id": "stavropol",
+        "name": "Ставропольский край",
+        "macro_region": "Северный Кавказ",
+        "climate_zone": "Зона рискованного земледелия (засухоустойчивые культуры)",
+        "dominant_crops": ["озимая пшеница", "горох", "подсолнечник"],
+        "center_lat": 45.05,
+        "center_lon": 42.10,
+        "zoom": 11,
+        "bbox": [41.85, 44.9, 42.35, 45.2]
+    },
+    "altay": {
+        "id": "altay",
+        "name": "Алтайский край",
+        "macro_region": "Западная Сибирь",
+        "climate_zone": "Резко-континентальная (короткий вегетационный период, яровые)",
+        "dominant_crops": ["яровая пшеница", "овес", "гречиха"],
+        "center_lat": 52.80,
+        "center_lon": 83.20,
+        "zoom": 11,
+        "bbox": [82.95, 52.65, 83.45, 52.95]
+    },
+    "tatarstan": {
+        "id": "tatarstan",
+        "name": "Республика Татарстан",
+        "macro_region": "Волго-Вятский агрорегион",
+        "climate_zone": "Умеренно-континентальная лесостепь",
+        "dominant_crops": ["яровые зерновые", "озимая рожь", "рапс"],
+        "center_lat": 55.45,
+        "center_lon": 49.80,
+        "zoom": 11,
+        "bbox": [49.55, 55.3, 50.05, 55.6]
+    },
+    "belgorod": {
+        "id": "belgorod",
+        "name": "Белгородская область",
+        "macro_region": "Центральное Черноземье",
+        "climate_zone": "Интенсивное агропроизводство",
+        "dominant_crops": ["озимая пшеница", "соя", "кукуруза"],
+        "center_lat": 50.60,
+        "center_lon": 36.80,
+        "zoom": 11,
+        "bbox": [36.55, 50.45, 37.05, 50.75]
+    },
+    "saratov": {
+        "id": "saratov",
+        "name": "Саратовская область",
+        "macro_region": "Нижнее Поволжье",
+        "climate_zone": "Засушливая степь (твердые сорта пшеницы)",
+        "dominant_crops": ["твердая пшеница", "подсолнечник", "просо"],
+        "center_lat": 51.60,
+        "center_lon": 46.40,
+        "zoom": 11,
+        "bbox": [46.15, 51.45, 46.65, 51.75]
+    },
+    "orenburg": {
+        "id": "orenburg",
+        "name": "Оренбургская область",
+        "macro_region": "Южный Урал / Степь",
+        "climate_zone": "Сухостепная (высокая инсоляция)",
+        "dominant_crops": ["яровая твердая пшеница", "подсолнечник"],
+        "center_lat": 51.85,
+        "center_lon": 55.30,
+        "zoom": 11,
+        "bbox": [55.05, 51.7, 55.55, 52.0]
+    }
+}
+
+@app.get("/api/regions")
+def get_regions_list():
+    """
+    Возвращает каталог ключевых сельскохозяйственных регионов России
+    для быстрого переключения мониторинга и автоматического поиска полей.
+    """
+    return {
+        "total": len(REGIONS_CATALOG),
+        "regions": list(REGIONS_CATALOG.values())
+    }
+
+@app.get("/api/regions/{region_id}/summary")
+def get_region_summary(
+    region_id: str,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    year: Optional[int] = Query(None)
+):
+    """
+    Сводная агроклиматическая аналитика по выбранному региону:
+    1. Запрос реальной метеорологии ERA5 (температура, осадки).
+    2. Расчет гидротермического коэффициента Селянинова (ГТК) и индекса засухи.
+    3. Автоматический сбор доступных полей в регионе через OSM.
+    4. Оценка региональных рисков для культур.
+    """
+    reg = REGIONS_CATALOG.get(region_id)
+    if not reg:
+        raise HTTPException(status_code=404, detail=f"Регион «{region_id}» не найден в каталоге")
+
+    start_date, end_date, target_yr = validate_period(start_date, end_date, year)
+    
+    # 1. Запрос реальной метеорологии ERA5 для центральной точки региона
+    lat = reg["center_lat"]
+    lon = reg["center_lon"]
+    weather_df = fetch_real_weather(lat, lon, year=target_yr, start_date=start_date, end_date=end_date)
+    
+    mean_t = float(weather_df["era5_temp_c"].mean()) if not weather_df.empty else 18.0
+    max_t = float(weather_df["era5_temp_c"].max()) if not weather_df.empty else 28.0
+    tot_p = float(weather_df["era5_precip_mm"].sum()) if not weather_df.empty else 150.0
+
+    # Расчет гидротермического коэффициента Селянинова (ГТК) для активной вегетации (T >= 10°C)
+    warm_days = weather_df[weather_df["era5_temp_c"] >= 10.0] if not weather_df.empty else pd.DataFrame()
+    sum_t_warm = float(warm_days["era5_temp_c"].sum()) if not warm_days.empty else 0.0
+    sum_p_warm = float(warm_days["era5_precip_mm"].sum()) if not warm_days.empty else tot_p
+
+    if sum_t_warm > 50.0:
+        gtk = round((sum_p_warm * 10.0) / sum_t_warm, 2)
+    else:
+        gtk = round((tot_p * 10.0) / max(100.0, mean_t * len(weather_df)), 2)
+
+    # Категоризация влагообеспеченности региона по агрономическому стандарту
+    if gtk < 0.4:
+        moisture_status = "Очень сильная засуха"
+        risk_level = "Критический"
+    elif gtk < 0.7:
+        moisture_status = "Засушливые условия"
+        risk_level = "Повышенный"
+    elif gtk < 1.0:
+        moisture_status = "Недостаточное увлажнение"
+        risk_level = "Умеренный"
+    elif gtk <= 1.4:
+        moisture_status = "Оптимальное увлажнение (Норма)"
+        risk_level = "Низкий"
+    else:
+        moisture_status = "Избыточное увлажнение"
+        risk_level = "Умеренный (риск переувлажнения)"
+
+    # 2. Автоматический поиск полей региона в OSM
+    bbox = reg["bbox"]
+    fields = fetch_osm_farmland_polygons(bbox[0], bbox[1], bbox[2], bbox[3], limit=15)
+
+    return {
+        "region": reg,
+        "period": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "days_count": len(weather_df)
+        },
+        "weather": {
+            "mean_temp_c": round(mean_t, 1),
+            "max_temp_c": round(max_t, 1),
+            "total_precip_mm": round(tot_p, 1),
+            "gtk_index": gtk,
+            "moisture_status": moisture_status,
+            "risk_level": risk_level
+        },
+        "discovered_fields_count": len(fields),
+        "fields_geojson": {
+            "type": "FeatureCollection",
+            "features": fields
+        }
+    }
+
+# Дополнительный локальный справочник аграрных регионов РФ для мгновенного и надежного геокодинга без задержек
+EXTRA_REGIONS_GEO = {
+    "тамбов": {"name": "Тамбовская область", "lat": 52.721, "lon": 41.452, "bbox": [40.8, 52.2, 42.1, 53.2]},
+    "курск": {"name": "Курская область", "lat": 51.730, "lon": 36.193, "bbox": [35.5, 51.2, 37.0, 52.2]},
+    "липецк": {"name": "Липецкая область", "lat": 52.610, "lon": 39.599, "bbox": [38.8, 52.2, 40.4, 53.0]},
+    "орел": {"name": "Орловская область", "lat": 52.965, "lon": 36.064, "bbox": [35.4, 52.5, 36.8, 53.4]},
+    "тула": {"name": "Тульская область", "lat": 54.193, "lon": 37.617, "bbox": [36.8, 53.6, 38.4, 54.7]},
+    "рязань": {"name": "Рязанская область", "lat": 54.629, "lon": 39.735, "bbox": [39.0, 54.0, 40.6, 55.2]},
+    "пенза": {"name": "Пензенская область", "lat": 53.195, "lon": 45.018, "bbox": [44.2, 52.7, 45.8, 53.7]},
+    "ульяновск": {"name": "Ульяновская область", "lat": 54.314, "lon": 48.403, "bbox": [47.5, 53.8, 49.3, 54.8]},
+    "волгоград": {"name": "Волгоградская область", "lat": 48.707, "lon": 44.517, "bbox": [43.6, 48.0, 45.4, 49.4]},
+    "башкортостан": {"name": "Республика Башкортостан", "lat": 54.735, "lon": 55.958, "bbox": [55.0, 54.0, 56.9, 55.4]},
+    "мордовия": {"name": "Республика Мордовия", "lat": 54.187, "lon": 45.183, "bbox": [44.2, 53.8, 46.0, 54.6]},
+    "чувашия": {"name": "Чувашская Республика", "lat": 56.143, "lon": 47.248, "bbox": [46.6, 55.5, 47.9, 56.5]},
+    "омск": {"name": "Омская область", "lat": 54.988, "lon": 73.368, "bbox": [72.5, 54.4, 74.2, 55.6]},
+    "новосибирск": {"name": "Новосибирская область", "lat": 55.030, "lon": 82.920, "bbox": [82.0, 54.5, 83.8, 55.5]}
+}
+
+@app.get("/api/regions/geocode")
+def geocode_region(query: str = Query(..., min_length=2)):
+    """
+    Поиск любого произвольного региона, района или города в России и мире.
+    Сначала выполняет мгновенный поиск по расширенному аграрному каталогу регионов РФ,
+    при необходимости обращается к внешнему геокодеру Nominatim.
+    Возвращает географические координаты и bounding box для мгновенного переноса карты и поиска полей.
+    """
+    import urllib.parse
+    clean_q = query.strip().lower()
+    results = []
+
+    # 1. Поиск по основному каталогу регионов
+    for r_id, reg in REGIONS_CATALOG.items():
+        if clean_q in reg["name"].lower() or clean_q in r_id:
+            results.append({
+                "name": reg["name"],
+                "lat": reg["center_lat"],
+                "lon": reg["center_lon"],
+                "bbox": reg["bbox"]
+            })
+
+    # 2. Поиск по дополнительному российскому справочнику
+    for key, item in EXTRA_REGIONS_GEO.items():
+        if clean_q in key or clean_q in item["name"].lower():
+            if not any(r["name"] == item["name"] for r in results):
+                results.append({
+                    "name": item["name"],
+                    "lat": item["lat"],
+                    "lon": item["lon"],
+                    "bbox": item["bbox"]
+                })
+
+    # 3. Если ничего не найдено в локальной базе — опрос внешнего геокодера Nominatim
+    if not results:
+        encoded = urllib.parse.quote(query.strip())
+        url = f"https://nominatim.openstreetmap.org/search?q={encoded}&format=json&limit=5&countrycodes=ru,by,kz,uz,kg"
+        headers = {"User-Agent": "GeoVegaHackathon/1.0 (agro-monitoring)"}
+        try:
+            resp = requests.get(url, headers=headers, timeout=3, verify=False)
+            if resp.status_code == 200:
+                items = resp.json()
+                for it in items:
+                    lat = float(it["lat"])
+                    lon = float(it["lon"])
+                    bb = [float(c) for c in it.get("boundingbox", [lat-0.2, lat+0.2, lon-0.2, lon+0.2])]
+                    results.append({
+                        "name": it.get("display_name", query.strip()),
+                        "lat": lat,
+                        "lon": lon,
+                        "bbox": [bb[2], bb[0], bb[3], bb[1]]  # [min_lon, min_lat, max_lon, max_lat]
+                    })
+        except Exception as e:
+            print(f"[Geocode] Внешний геокодер недоступен: {e}")
+
+    return {
+        "success": True,
+        "query": query.strip(),
+        "total": len(results),
+        "results": results
+    }
+
 @app.get("/api/years")
 def get_available_years_api():
     """
@@ -174,48 +468,52 @@ def validate_period(start_date: Optional[str], end_date: Optional[str], year: Op
             detail="Некорректный запрос: необходимо указать обе границы периода (начальную и конечную даты)."
         )
 
-    # 1. Parse and verify real calendar existence (catches 2026-02-30, etc.)
-    try:
-        s_dt = datetime.strptime(start_date, "%Y-%m-%d")
-    except ValueError:
+    # 1. Парсинг и проверка физического существования даты (поддержка форматов ДД.ММ.ГГГГ и ГГГГ-ММ-ДД)
+    def parse_calendar_date(d_str: str, label: str) -> datetime:
+        d_clean = d_str.strip()
+        for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(d_clean, fmt)
+            except ValueError:
+                continue
         raise HTTPException(
             status_code=400,
-            detail=f"Несуществующая дата начала: «{start_date}». Проверьте правильность дня и месяца."
+            detail=f"Несуществующая дата {label}: «{d_clean}». Используйте формат ДД.ММ.ГГГГ (например, 01.01.2026)."
         )
 
-    try:
-        e_dt = datetime.strptime(end_date, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Несуществующая дата окончания: «{end_date}». Проверьте правильность дня и месяца."
-        )
+    s_dt = parse_calendar_date(start_date, "начала")
+    e_dt = parse_calendar_date(end_date, "окончания")
 
-    # 2. Archive lower bound
+    # Нормализация дат к каноническому формату ISO (YYYY-MM-DD) для спутников и метеоархивов
+    start_date = s_dt.strftime("%Y-%m-%d")
+    end_date = e_dt.strftime("%Y-%m-%d")
+
+    # 2. Ограничение снизу: запуск космических архивов ДЗЗ
     if start_date < min_date:
         raise HTTPException(
             status_code=400,
-            detail=f"Несуществующий период наблюдений: дата начала ({start_date}) предшествует запуску спутниковых архивов (доступно с {min_date})."
+            detail=f"Несуществующий период наблюдений: дата начала ({s_dt.strftime('%d.%m.%Y')}) предшествует запуску спутниковых архивов (доступно с 01.01.2014)."
         )
 
-    # 3. Future dates check
+    # 3. Контроль дат из будущего (сравнение с сегодняшним днем)
+    today_ru = now.strftime('%d.%m.%Y')
     if start_date > today_str:
         raise HTTPException(
             status_code=400,
-            detail=f"Несуществующий период: начальная дата ({start_date}) находится в будущем. Текущая дата: {today_str}."
+            detail=f"Несуществующий период: начальная дата ({s_dt.strftime('%d.%m.%Y')}) находится в будущем. Текущая дата: {today_ru}."
         )
 
     if end_date > today_str:
         raise HTTPException(
             status_code=400,
-            detail=f"Несуществующий период: конечная дата ({end_date}) находится в будущем. Спутниковые наблюдения и фактическая погода доступны до {today_str} включительно."
+            detail=f"Несуществующий период: конечная дата ({e_dt.strftime('%d.%m.%Y')}) находится в будущем. Спутниковые наблюдения и фактическая погода доступны до {today_ru} включительно."
         )
 
-    # 4. Inverted chronological sequence
+    # 4. Защита от хронологически инвертированных периодов
     if start_date > end_date:
         raise HTTPException(
             status_code=400,
-            detail=f"Несуществующий период: дата начала ({start_date}) не может быть позже даты окончания ({end_date})."
+            detail=f"Несуществующий период: дата начала ({s_dt.strftime('%d.%m.%Y')}) не может быть позже даты окончания ({e_dt.strftime('%d.%m.%Y')})."
         )
 
     yr = s_dt.year
@@ -645,4 +943,4 @@ app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("src.web.app:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("src.web.app:app", host="0.0.0.0", port=8000, reload=True)

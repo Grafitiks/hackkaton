@@ -4,9 +4,38 @@ let map, drawnItems, drawControl, activeDrawHandler = null;
 let esriSatelliteLayer, osmLayer;
 let osmFieldLayers = {};
 let userSavedFields = {}; // Dictionary of custom fields: id -> { id, name, color, geojson, areaHa, centerLat, centerLon, layer, data }
-let selectedStartDate = "2026-01-01";
-let selectedEndDate = "2026-09-05";
+let customFieldGroups = {}; // Dictionary of custom field groups: groupId -> { id, name, desc, createdAt, fields: {} }
+let activeGroupId = null; // Currently selected custom group id or null
+let selectedStartDate = "01.01.2026";
+let selectedEndDate = "05.09.2026";
 let fieldCounter = 1;
+
+// ============================================================================
+// УТИЛИТЫ ФОРМАТИРОВАНИЯ ДАТ (ДД.ММ.ГГГГ <-> ГГГГ-ММ-ДД ISO)
+// Обеспечивают единый российский агрономический формат интерфейса и совместимость с API
+// ============================================================================
+
+/** Преобразование даты из формата ДД.ММ.ГГГГ в канонический ISO ГГГГ-ММ-ДД */
+function formatDateToIso(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  const str = dateStr.trim();
+  const ruMatch = str.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (ruMatch) {
+    return `${ruMatch[3]}-${ruMatch[2]}-${ruMatch[1]}`;
+  }
+  return str;
+}
+
+/** Преобразование даты из канонического ISO ГГГГ-ММ-ДД в формат ДД.ММ.ГГГГ */
+function formatDateToRu(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  const str = dateStr.trim();
+  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    return `${isoMatch[3]}.${isoMatch[2]}.${isoMatch[1]}`;
+  }
+  return str;
+}
 
 let ndviChartInstance = null;
 let weatherChartInstance = null;
@@ -16,9 +45,13 @@ let isSyncingScales = false;
 let isDrawingActive = false;
 
 // Register Chart.js Zoom plugin if available
-if (typeof Chart !== 'undefined' && typeof ChartZoom !== 'undefined') {
+if (typeof Chart !== 'undefined') {
   try {
-    Chart.register(ChartZoom);
+    if (typeof ChartZoom !== 'undefined') {
+      Chart.register(ChartZoom);
+    } else if (typeof window['chartjs-plugin-zoom'] !== 'undefined') {
+      Chart.register(window['chartjs-plugin-zoom']);
+    }
   } catch (e) {
     console.debug("ChartZoom registration:", e);
   }
@@ -34,10 +67,14 @@ function isInsideAgroZone(lat, lon) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  try { localStorage.removeItem("geovega_saved_user_fields"); } catch (e) {}
   initMap();
   initEventHandlers();
   initDropdowns();
+  initRegionsModule();
   initFieldModal();
+  initGroupModal();
+  loadGroupsFromStorage();
   initPassportModal();
   loadBatchStatus();
 });
@@ -416,6 +453,24 @@ function initEventHandlers() {
     });
   }
 
+  // Delete Field Button
+  const deleteFieldBtn = document.getElementById("deleteFieldBtn");
+  if (deleteFieldBtn) {
+    deleteFieldBtn.addEventListener("click", () => {
+      if (selectedFieldId) {
+        deleteSelectedField(selectedFieldId);
+      }
+    });
+  }
+
+  // Delete Group Button
+  const deleteGroupBtn = document.getElementById("deleteGroupBtn");
+  if (deleteGroupBtn) {
+    deleteGroupBtn.addEventListener("click", () => {
+      deleteCurrentGroup();
+    });
+  }
+
   // Select crop
   const cropSelectEl = document.getElementById("cropSelect");
   if (cropSelectEl) {
@@ -551,29 +606,49 @@ async function initDropdowns() {
   const polySelect = document.getElementById("polygonSelect");
   const group = document.querySelector(".date-range-group");
 
-  const todayStr = "2026-09-05";
-  const minArchiveDate = "2014-01-01";
+  const todayIso = "2026-09-05";
+  const minArchiveIso = "2014-01-01";
+  const todayRu = "05.09.2026";
+  const minArchiveRu = "01.01.2014";
 
-  // Verifies that a string is a real calendar date (no Feb 30 or April 31)
+  // Проверка физического существования даты в реальном календаре (ДД.ММ.ГГГГ и ГГГГ-ММ-ДД)
   function isValidCalendarDate(str) {
     if (!str || typeof str !== 'string') return false;
-    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!m) return false;
-    const y = parseInt(m[1], 10);
-    const mon = parseInt(m[2], 10);
-    const d = parseInt(m[3], 10);
-    if (mon < 1 || mon > 12) return false;
-    if (d < 1 || d > 31) return false;
-    const dt = new Date(y, mon - 1, d);
-    return dt.getFullYear() === y && (dt.getMonth() + 1) === mon && dt.getDate() === d;
+    const trimmed = str.trim();
+
+    // Формат ДД.ММ.ГГГГ (основной российский стандарт)
+    const ruMatch = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    if (ruMatch) {
+      const d = parseInt(ruMatch[1], 10);
+      const mon = parseInt(ruMatch[2], 10);
+      const y = parseInt(ruMatch[3], 10);
+      if (mon < 1 || mon > 12) return false;
+      if (d < 1 || d > 31) return false;
+      const dt = new Date(y, mon - 1, d);
+      return dt.getFullYear() === y && (dt.getMonth() + 1) === mon && dt.getDate() === d;
+    }
+
+    // Формат ГГГГ-ММ-ДД (ISO)
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch) {
+      const y = parseInt(isoMatch[1], 10);
+      const mon = parseInt(isoMatch[2], 10);
+      const d = parseInt(isoMatch[3], 10);
+      if (mon < 1 || mon > 12) return false;
+      if (d < 1 || d > 31) return false;
+      const dt = new Date(y, mon - 1, d);
+      return dt.getFullYear() === y && (dt.getMonth() + 1) === mon && dt.getDate() === d;
+    }
+
+    return false;
   }
 
-  // Strictly validates and constrains date bounds so non-existent intervals cannot exist
+  // Строгая валидация и ограничение интервалов дат с защитой от несуществующих периодов
   function validateAndSyncDateInputs(triggerAlert = false) {
     if (!startInput || !endInput) return false;
 
-    const sVal = startInput.value;
-    const eVal = endInput.value;
+    const sVal = startInput.value.trim();
+    const eVal = endInput.value.trim();
 
     const sValid = isValidCalendarDate(sVal);
     const eValid = isValidCalendarDate(eVal);
@@ -585,56 +660,58 @@ async function initDropdowns() {
       if (group) group.classList.add("invalid");
       if (applyBtn) applyBtn.disabled = true;
       if (triggerAlert) {
-        showToast("Указана несуществующая календарная дата (проверьте число и месяц).", true);
+        showToast("Указана несуществующая календарная дата. Проверьте число и месяц (формат: ДД.ММ.ГГГГ).", true);
       }
       return false;
     }
 
-    let curStart = sVal;
-    let curEnd = eVal;
+    let curStartIso = formatDateToIso(sVal);
+    let curEndIso = formatDateToIso(eVal);
 
-    // 1. Lower bound (2014-01-01)
-    if (curStart < minArchiveDate) {
-      curStart = minArchiveDate;
-      startInput.value = minArchiveDate;
-      if (triggerAlert) showToast(`Спутниковые архивы доступны с ${minArchiveDate}.`, true);
+    // 1. Ограничение снизу: запуск космических архивов ДЗЗ (01.01.2014)
+    if (curStartIso < minArchiveIso) {
+      curStartIso = minArchiveIso;
+      if (triggerAlert) showToast(`Спутниковые архивы доступны с 01.01.2014.`, true);
     }
-    if (curEnd < minArchiveDate) {
-      curEnd = minArchiveDate;
-      endInput.value = minArchiveDate;
+    if (curEndIso < minArchiveIso) {
+      curEndIso = minArchiveIso;
     }
 
-    // 2. Upper bound (cannot be future)
-    if (curStart > todayStr) {
-      curStart = todayStr;
-      startInput.value = todayStr;
-      if (triggerAlert) showToast(`Начальная дата не может быть в будущем (сегодня: ${todayStr}).`, true);
+    // 2. Ограничение сверху: дата не может быть из будущего (сегодня: 05.09.2026)
+    if (curStartIso > todayIso) {
+      curStartIso = todayIso;
+      if (triggerAlert) showToast(`Начальная дата не может быть в будущем (сегодня: 05.09.2026).`, true);
     }
-    if (curEnd > todayStr) {
-      curEnd = todayStr;
-      endInput.value = todayStr;
-      if (triggerAlert) showToast(`Конечная дата не может быть в будущем (сегодня: ${todayStr}).`, true);
+    if (curEndIso > todayIso) {
+      curEndIso = todayIso;
+      if (triggerAlert) showToast(`Конечная дата не может быть в будущем (сегодня: 05.09.2026).`, true);
     }
 
-    // 3. Inverted / chronologically impossible intervals (start > end)
-    if (curStart > curEnd) {
+    // 3. Защита от хронологически инвертированных периодов (начало > конец)
+    if (curStartIso > curEndIso) {
       if (triggerAlert) {
         showToast("Несуществующий период: начальная дата не может быть позже конечной.", true);
       }
-      // Re-align so range is valid
-      curEnd = curStart;
-      endInput.value = curStart;
+      curEndIso = curStartIso;
     }
 
-    // Dynamic constraint attributes on native date picker
-    startInput.min = minArchiveDate;
-    startInput.max = curEnd < todayStr ? curEnd : todayStr;
+    const curStartRu = formatDateToRu(curStartIso);
+    const curEndRu = formatDateToRu(curEndIso);
 
-    endInput.min = curStart > minArchiveDate ? curStart : minArchiveDate;
-    endInput.max = todayStr;
+    startInput.value = curStartRu;
+    endInput.value = curEndRu;
 
-    selectedStartDate = curStart;
-    selectedEndDate = curEnd;
+    selectedStartDate = curStartRu;
+    selectedEndDate = curEndRu;
+
+    if (startPicker) {
+      startPicker.setDate(curStartRu, false);
+      startPicker.set("maxDate", curEndRu);
+    }
+    if (endPicker) {
+      endPicker.setDate(curEndRu, false);
+      endPicker.set("minDate", curStartRu);
+    }
 
     if (group) group.classList.remove("invalid");
     if (applyBtn) applyBtn.disabled = false;
@@ -654,15 +731,15 @@ async function initDropdowns() {
   let startPicker = null;
   let endPicker = null;
 
-  // Инициализация единого кибер-агрономического календаря Flatpickr с поддержкой ввода с клавиатуры
+  // Инициализация единого кибер-агрономического календаря Flatpickr в формате ДД.ММ.ГГГГ
   if (typeof flatpickr !== 'undefined') {
     startPicker = flatpickr("#startDateInput", {
       locale: "ru",
-      dateFormat: "Y-m-d",
+      dateFormat: "d.m.Y",
       defaultDate: selectedStartDate,
-      minDate: minArchiveDate,
+      minDate: minArchiveRu,
       maxDate: selectedEndDate,
-      allowInput: true, // Разрешает прямой ввод даты с физической клавиатуры
+      allowInput: true, // Разрешает прямой ввод даты с клавиатуры в формате ДД.ММ.ГГГГ
       clickOpens: true,
       disableMobile: true,
       onChange: function(selectedDates, dateStr) {
@@ -681,11 +758,11 @@ async function initDropdowns() {
 
     endPicker = flatpickr("#endDateInput", {
       locale: "ru",
-      dateFormat: "Y-m-d",
+      dateFormat: "d.m.Y",
       defaultDate: selectedEndDate,
       minDate: selectedStartDate,
-      maxDate: todayStr,
-      allowInput: true, // Разрешает прямой ввод даты с физической клавиатуры
+      maxDate: todayRu,
+      allowInput: true, // Разрешает прямой ввод даты с клавиатуры в формате ДД.ММ.ГГГГ
       clickOpens: true,
       disableMobile: true,
       onChange: function(selectedDates, dateStr) {
@@ -709,11 +786,13 @@ async function initDropdowns() {
 
     inputEl.addEventListener("input", () => {
       const val = inputEl.value.trim();
-      // Если введен полный формат даты ГГГГ-ММ-ДД
+      // Если введен полный формат даты (10 символов: ДД.ММ.ГГГГ или ГГГГ-ММ-ДД)
       if (val.length === 10) {
         if (isValidCalendarDate(val)) {
+          const ruVal = formatDateToRu(val);
+          inputEl.value = ruVal;
           if (pickerInstance) {
-            pickerInstance.setDate(val, false);
+            pickerInstance.setDate(ruVal, false);
           }
           validateAndSyncDateInputs(false);
         } else {
@@ -725,6 +804,10 @@ async function initDropdowns() {
     inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
+        const val = inputEl.value.trim();
+        if (isValidCalendarDate(val)) {
+          inputEl.value = formatDateToRu(val);
+        }
         if (validateAndSyncDateInputs(true)) {
           if (pickerInstance) {
             pickerInstance.setDate(inputEl.value.trim(), false);
@@ -736,6 +819,10 @@ async function initDropdowns() {
     });
 
     inputEl.addEventListener("change", () => {
+      const val = inputEl.value.trim();
+      if (isValidCalendarDate(val)) {
+        inputEl.value = formatDateToRu(val);
+      }
       if (validateAndSyncDateInputs(true)) {
         if (pickerInstance) {
           pickerInstance.setDate(inputEl.value.trim(), false);
@@ -777,14 +864,927 @@ async function initDropdowns() {
   }
 }
 
+// ============================================================================
+// 3.1 МОДУЛЬ РЕГИОНАЛЬНОГО АГРОМОНИТОРИНГА
+// Критерий: Адаптивность под множественные регионы и автопоиск контуров полей
+// ============================================================================
+
+const DEFAULT_REGIONS = {
+  samara: { id: "samara", name: "Самарская область (Поволжье)", macro_region: "Среднее Поволжье", climate_zone: "Лесостепная / Степная зона", dominant_crops: ["яровая пшеница", "подсолнечник", "ячмень"], center_lat: 53.25, center_lon: 50.35, zoom: 11, bbox: [50.1, 53.1, 50.6, 53.4] },
+  krasnodar: { id: "krasnodar", name: "Краснодарский край (Кубань)", macro_region: "Южный ФО / Прикубанская равнина", climate_zone: "Умеренно-теплый", dominant_crops: ["озимая пшеница", "кукуруза", "подсолнечник", "соя"], center_lat: 45.20, center_lon: 39.10, zoom: 11, bbox: [38.85, 45.05, 39.35, 45.35] },
+  rostov: { id: "rostov", name: "Ростовская область (Дон)", macro_region: "Южный ФО / Нижний Дон", climate_zone: "Умеренно-засушливая степь", dominant_crops: ["озимая пшеница", "подсолнечник", "зернобобовые"], center_lat: 47.35, center_lon: 39.90, zoom: 11, bbox: [39.65, 47.2, 40.15, 47.5] },
+  voronezh: { id: "voronezh", name: "Воронежская область (Черноземье)", macro_region: "Центрально-Черноземный район", climate_zone: "Типичная лесостепь (черноземы)", dominant_crops: ["сахарная свекла", "озимая пшеница", "подсолнечник"], center_lat: 51.50, center_lon: 39.40, zoom: 11, bbox: [39.15, 51.35, 39.65, 51.65] },
+  stavropol: { id: "stavropol", name: "Ставропольский край (Кавказ)", macro_region: "Северо-Кавказский ФО", climate_zone: "Засушливая и умеренная степь", dominant_crops: ["озимая пшеница", "горох", "рапс"], center_lat: 45.10, center_lon: 42.10, zoom: 11, bbox: [41.85, 44.95, 42.35, 45.25] },
+  altay: { id: "altay", name: "Алтайский край (Сибирь)", macro_region: "Западная Сибирь", climate_zone: "Резко континентальный", dominant_crops: ["яровая пшеница", "гречиха", "овес"], center_lat: 52.80, center_lon: 83.20, zoom: 11, bbox: [82.95, 52.65, 83.45, 52.95] },
+  tatarstan: { id: "tatarstan", name: "Республика Татарстан", macro_region: "Среднее Поволжье", climate_zone: "Умеренно-континентальный лесостепной", dominant_crops: ["яровая пшеница", "рожь", "рапс"], center_lat: 55.65, center_lon: 49.30, zoom: 11, bbox: [49.05, 55.5, 49.55, 55.8] },
+  belgorod: { id: "belgorod", name: "Белгородская область", macro_region: "Центрально-Черноземный район", climate_zone: "Лесостепная зона высокой продуктивности", dominant_crops: ["соя", "кукуруза на зерно", "озимая пшеница"], center_lat: 50.60, center_lon: 36.80, zoom: 11, bbox: [36.55, 50.45, 37.05, 50.75] },
+  saratov: { id: "saratov", name: "Саратовская область", macro_region: "Нижнее Поволжье", climate_zone: "Засушливая степь", dominant_crops: ["твердая пшеница", "подсолнечник", "просо"], center_lat: 51.60, center_lon: 46.40, zoom: 11, bbox: [46.15, 51.45, 46.65, 51.75] },
+  orenburg: { id: "orenburg", name: "Оренбургская область", macro_region: "Южный Урал / Степь", climate_zone: "Сухостепная", dominant_crops: ["яровая твердая пшеница", "подсолнечник"], center_lat: 51.85, center_lon: 55.30, zoom: 11, bbox: [55.05, 51.7, 55.55, 52.0] }
+};
+
+let currentRegionId = null;
+let regionsCatalog = { ...DEFAULT_REGIONS };
+
+// ============================================================================
+// УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЬСКИМИ ГРУППАМИ ПОЛЕЙ (ХОЗЯЙСТВА / КЛАСТЕРЫ В «РЕГИОНЕ»)
+// ============================================================================
+
+function getRussianFieldCountWord(count) {
+  const abs = Math.abs(count) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return "полей";
+  if (last > 1 && last < 5) return "поля";
+  if (last === 1) return "поле";
+  return "полей";
+}
+
+function saveGroupsToStorage() {
+  try {
+    const toSave = {};
+    Object.keys(customFieldGroups).forEach(gId => {
+      const g = customFieldGroups[gId];
+      const cleanFields = {};
+      Object.keys(g.fields || {}).forEach(fId => {
+        const f = g.fields[fId];
+        cleanFields[fId] = {
+          id: f.id,
+          name: f.name,
+          color: f.color || "#00f0ff",
+          geojson: f.geojson,
+          areaHa: f.areaHa,
+          centerLat: f.centerLat,
+          centerLon: f.centerLon
+        };
+      });
+      toSave[gId] = {
+        id: g.id,
+        name: g.name,
+        desc: g.desc || "",
+        createdAt: g.createdAt,
+        fields: cleanFields
+      };
+    });
+    localStorage.setItem("geovega_custom_field_groups", JSON.stringify(toSave));
+  } catch (e) {
+    console.error("Ошибка сохранения групп полей в localStorage:", e);
+  }
+}
+
+function loadGroupsFromStorage() {
+  try {
+    const stored = localStorage.getItem("geovega_custom_field_groups");
+    if (stored) {
+      customFieldGroups = JSON.parse(stored) || {};
+    }
+  } catch (e) {
+    console.error("Ошибка загрузки групп полей из localStorage:", e);
+    customFieldGroups = {};
+  }
+  renderGroupsInRegionSelect();
+}
+
+function renderGroupsInRegionSelect() {
+  const optgroup = document.getElementById("customGroupsOptgroup");
+  if (!optgroup) return;
+
+  optgroup.innerHTML = "";
+  const groupKeys = Object.keys(customFieldGroups);
+
+  if (groupKeys.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.disabled = true;
+    opt.textContent = "— Нет созданных групп —";
+    optgroup.appendChild(opt);
+    return;
+  }
+
+  groupKeys.forEach(gId => {
+    const grp = customFieldGroups[gId];
+    const count = Object.keys(grp.fields || {}).length;
+    const opt = document.createElement("option");
+    opt.value = grp.id;
+    opt.textContent = `📁 ${grp.name} (${count} ${getRussianFieldCountWord(count)})`;
+    optgroup.appendChild(opt);
+  });
+
+  const regionSelect = document.getElementById("regionSelect");
+  if (regionSelect && activeGroupId && customFieldGroups[activeGroupId]) {
+    regionSelect.value = activeGroupId;
+  }
+}
+
+// Удаление активной группы полей
+function deleteCurrentGroup() {
+  if (!activeGroupId || !customFieldGroups[activeGroupId]) {
+    showToast("Пожалуйста, сначала выберите группу полей из списка!", true);
+    return;
+  }
+
+  const group = customFieldGroups[activeGroupId];
+  const groupName = group.name;
+  const count = Object.keys(group.fields || {}).length;
+
+  if (!confirm(`Вы уверены, что хотите удалить группу «${groupName}» и все входящие в неё поля (${count} ${getRussianFieldCountWord(count)})?`)) {
+    return;
+  }
+
+  // 1. Удаляем все слои полей этой группы с карты
+  clearPreviousRegionFields(groupName);
+
+  // 2. Удаляем группу из коллекции и обновляем хранилище
+  delete customFieldGroups[activeGroupId];
+  activeGroupId = null;
+  currentRegionId = null;
+  saveGroupsToStorage();
+  renderGroupsInRegionSelect();
+
+  // 3. Сбрасываем селекторы
+  const regionSelect = document.getElementById("regionSelect");
+  if (regionSelect) regionSelect.value = "";
+
+  const polygonSelect = document.getElementById("polygonSelect");
+  if (polygonSelect) {
+    polygonSelect.innerHTML = '<option value="" disabled selected>— Нет полей (выберите группу или нарисуйте на карте) —</option>';
+  }
+
+  const labelEl = document.getElementById("polygonSelectLabel");
+  if (labelEl) labelEl.innerHTML = '<i class="fa-solid fa-map-pin"></i> Поля группы:';
+
+  const deleteGroupBtn = document.getElementById("deleteGroupBtn");
+  if (deleteGroupBtn) deleteGroupBtn.disabled = true;
+  const editFieldBtn = document.getElementById("editFieldBtn");
+  if (editFieldBtn) editFieldBtn.disabled = true;
+  const deleteFieldBtn = document.getElementById("deleteFieldBtn");
+  if (deleteFieldBtn) deleteFieldBtn.disabled = true;
+
+  showToast(`Группа полей «${groupName}» успешно удалена.`);
+}
+
+// Удаление выбранного поля
+function deleteSelectedField(fieldId) {
+  const targetId = fieldId || selectedFieldId;
+  if (!targetId) {
+    showToast("Поле для удаления не выбрано!", true);
+    return;
+  }
+
+  const field = userSavedFields[targetId];
+  const fieldName = field ? field.name : "выбранное поле";
+
+  if (!confirm(`Вы действительно хотите удалить поле «${fieldName}»?`)) {
+    return;
+  }
+
+  // 1. Удаляем слой с карты и из drawnItems
+  if (field && field.layer) {
+    try {
+      if (drawnItems && drawnItems.hasLayer(field.layer)) {
+        drawnItems.removeLayer(field.layer);
+      }
+      map.removeLayer(field.layer);
+    } catch (e) {}
+  }
+
+  // 2. Удаляем из рабочей коллекции userSavedFields
+  delete userSavedFields[targetId];
+
+  // 3. Если привязано к группе, удаляем из группы
+  if (activeGroupId && customFieldGroups[activeGroupId] && customFieldGroups[activeGroupId].fields) {
+    delete customFieldGroups[activeGroupId].fields[targetId];
+    saveGroupsToStorage();
+    renderGroupsInRegionSelect();
+  }
+
+  // 4. Удаляем пункт из выпадающего списка
+  const select = document.getElementById("polygonSelect");
+  if (select) {
+    const opt = select.querySelector(`option[value="${targetId}"]`);
+    if (opt) opt.remove();
+  }
+
+  closeFieldModal();
+
+  // 5. Проверяем оставшиеся поля
+  const remainingKeys = Object.keys(userSavedFields);
+  if (remainingKeys.length > 0) {
+    activateAndAnalyzeField(remainingKeys[0]);
+    showToast(`Поле «${fieldName}» удалено. Активировано поле «${userSavedFields[remainingKeys[0]].name}».`);
+  } else {
+    selectedFieldId = null;
+    if (select) {
+      select.innerHTML = (activeGroupId && customFieldGroups[activeGroupId])
+        ? `<option value="" disabled selected>— В группе «${customFieldGroups[activeGroupId].name}» нет полей (нарисуйте на карте) —</option>`
+        : '<option value="" disabled selected>— Нет полей (выберите группу или нарисуйте на карте) —</option>';
+    }
+    const editFieldBtn = document.getElementById("editFieldBtn");
+    if (editFieldBtn) editFieldBtn.disabled = true;
+    const deleteFieldBtn = document.getElementById("deleteFieldBtn");
+    if (deleteFieldBtn) deleteFieldBtn.disabled = true;
+
+    // Сброс индикаторов KPI
+    const statusEl = document.getElementById("statusText");
+    const beaconEl = document.getElementById("statusIndicator");
+    const ndviEl = document.getElementById("currentNdvi");
+    const cropSub = document.getElementById("cropTypeSub");
+    const zscoreEl = document.getElementById("currentZscore");
+    const gapsEl = document.getElementById("gapsCount");
+    const areaSub = document.getElementById("areaSub");
+
+    if (statusEl) statusEl.textContent = "Ожидание выбора поля";
+    if (beaconEl) beaconEl.className = "status-beacon normal";
+    if (ndviEl) ndviEl.textContent = "--";
+    if (cropSub) cropSub.textContent = "Культура: --";
+    if (zscoreEl) zscoreEl.textContent = "-- σ";
+    if (gapsEl) gapsEl.textContent = "--";
+    if (areaSub) areaSub.textContent = "Площадь: -- га";
+
+    showToast(`Поле «${fieldName}» удалено.`);
+  }
+}
+
+function initGroupModal() {
+  const createGroupBtn = document.getElementById("createGroupBtn");
+  const groupModal = document.getElementById("groupModal");
+  const closeGroupModalBtn = document.getElementById("closeGroupModalBtn");
+  const cancelGroupModalBtn = document.getElementById("cancelGroupModalBtn");
+  const saveGroupModalBtn = document.getElementById("saveGroupModalBtn");
+  const groupNameInput = document.getElementById("groupNameInput");
+  const groupDescInput = document.getElementById("groupDescInput");
+
+  if (!groupModal) return;
+
+  function openModal() {
+    if (groupNameInput) groupNameInput.value = "";
+    if (groupDescInput) groupDescInput.value = "";
+    groupModal.classList.remove("hidden");
+    if (groupNameInput) {
+      setTimeout(() => groupNameInput.focus(), 60);
+    }
+  }
+
+  function closeModal() {
+    groupModal.classList.add("hidden");
+  }
+
+  if (createGroupBtn) {
+    createGroupBtn.addEventListener("click", openModal);
+  }
+  if (closeGroupModalBtn) {
+    closeGroupModalBtn.addEventListener("click", closeModal);
+  }
+  if (cancelGroupModalBtn) {
+    cancelGroupModalBtn.addEventListener("click", closeModal);
+  }
+
+  groupModal.addEventListener("click", (e) => {
+    if (e.target === groupModal) closeModal();
+  });
+
+  function saveGroup() {
+    const name = groupNameInput ? groupNameInput.value.trim() : "";
+    const desc = groupDescInput ? groupDescInput.value.trim() : "";
+
+    if (!name) {
+      showToast("Пожалуйста, введите название группы полей!", true);
+      if (groupNameInput) groupNameInput.focus();
+      return;
+    }
+
+    const groupId = `group_${Date.now()}`;
+    customFieldGroups[groupId] = {
+      id: groupId,
+      name: name,
+      desc: desc,
+      createdAt: new Date().toISOString(),
+      fields: {}
+    };
+
+    saveGroupsToStorage();
+    renderGroupsInRegionSelect();
+    closeModal();
+
+    // Автоматически переключаем категорию «Регион» на созданную группу
+    const regionSelect = document.getElementById("regionSelect");
+    if (regionSelect) {
+      regionSelect.value = groupId;
+    }
+    switchRegion(groupId);
+    showToast(`Группа полей «${name}» создана! Нарисуйте контур поля на карте для добавления в группу.`);
+  }
+
+  if (saveGroupModalBtn) {
+    saveGroupModalBtn.addEventListener("click", saveGroup);
+  }
+
+  [groupNameInput, groupDescInput].forEach(inp => {
+    if (inp) {
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          saveGroup();
+        } else if (e.key === "Escape") {
+          closeModal();
+        }
+      });
+    }
+  });
+}
+
+async function initRegionsModule() {
+  const regionSelect = document.getElementById("regionSelect");
+  const regionSummaryBtn = document.getElementById("regionSummaryBtn");
+  const searchRegionBtn = document.getElementById("searchRegionBtn");
+  const summaryModal = document.getElementById("regionSummaryModal");
+  const closeSummaryBtn = document.getElementById("closeRegionModalBtn");
+  const regCloseBtn = document.getElementById("regCloseBtn");
+  const exploreFieldsBtn = document.getElementById("regExploreFieldsBtn");
+
+  const customModal = document.getElementById("customRegionModal");
+  const closeCustomBtn = document.getElementById("closeCustomRegBtn");
+  const geocodeInput = document.getElementById("geocodeInput");
+  const doGeocodeBtn = document.getElementById("doGeocodeBtn");
+  const geocodeResultsList = document.getElementById("geocodeResultsList");
+
+  // 1. Загрузка каталога регионов с сервера (обогащение метаданными)
+  try {
+    const resp = await fetch("/api/regions");
+    if (resp.ok) {
+      const data = await resp.json();
+      (data.regions || []).forEach(r => {
+        regionsCatalog[r.id] = { ...regionsCatalog[r.id], ...r };
+      });
+    }
+  } catch (e) {
+    console.warn("Не удалось загрузить каталог регионов с сервера (используется встроенный):", e);
+  }
+
+  // 2. Обработчик смены региона в селекторе
+  if (regionSelect) {
+    regionSelect.addEventListener("change", async (e) => {
+      await switchRegion(e.target.value);
+    });
+  }
+
+  // 3. Открытие сводки региона
+  if (regionSummaryBtn) {
+    regionSummaryBtn.addEventListener("click", () => {
+      if (!currentRegionId) {
+        showToast("Пожалуйста, сначала выберите группу или регион из списка!", true);
+        return;
+      }
+      openRegionSummaryModal(currentRegionId);
+    });
+  }
+
+  // 4. Кнопка глобального поиска региона на карте
+  if (searchRegionBtn) {
+    searchRegionBtn.addEventListener("click", () => {
+      if (customModal) {
+        customModal.classList.remove("hidden");
+        if (geocodeInput) {
+          geocodeInput.focus();
+          geocodeInput.select();
+        }
+      }
+    });
+  }
+
+  if (closeSummaryBtn) {
+    closeSummaryBtn.addEventListener("click", () => {
+      if (summaryModal) summaryModal.classList.add("hidden");
+    });
+  }
+  if (regCloseBtn) {
+    regCloseBtn.addEventListener("click", () => {
+      if (summaryModal) summaryModal.classList.add("hidden");
+    });
+  }
+  if (exploreFieldsBtn) {
+    exploreFieldsBtn.addEventListener("click", () => {
+      if (summaryModal) summaryModal.classList.add("hidden");
+      if (currentRegionId && currentRegionId.startsWith("group_")) {
+        const grp = customFieldGroups[currentRegionId];
+        if (grp) {
+          const bounds = L.latLngBounds([]);
+          Object.values(grp.fields || {}).forEach(f => {
+            if (f.layer) {
+              try { bounds.extend(f.layer.getBounds()); } catch (e) {}
+            } else if (f.centerLat && f.centerLon) {
+              bounds.extend([f.centerLat, f.centerLon]);
+            }
+          });
+          if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+          }
+        }
+        return;
+      }
+      const region = regionsCatalog[currentRegionId];
+      if (region) {
+        map.flyTo([region.center_lat, region.center_lon], region.zoom || 11, { animate: true, duration: 1.2 });
+      }
+    });
+  }
+
+  // Закрытие модалок по клику на затемненный фон
+  [summaryModal, customModal].forEach(modal => {
+    if (modal) {
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+          modal.classList.add("hidden");
+          if (regionSelect) regionSelect.value = currentRegionId;
+        }
+      });
+    }
+  });
+
+  // 5. Поиск произвольного региона через Nominatim
+  if (closeCustomBtn) {
+    closeCustomBtn.addEventListener("click", () => {
+      if (customModal) customModal.classList.add("hidden");
+      if (regionSelect) regionSelect.value = currentRegionId;
+    });
+  }
+
+  async function executeGeocoding() {
+    const q = geocodeInput ? geocodeInput.value.trim() : "";
+    if (!q || q.length < 2) {
+      showToast("Введите название региона для поиска (от 2 символов)", true);
+      return;
+    }
+    if (doGeocodeBtn) doGeocodeBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Поиск...`;
+    try {
+      const resp = await fetch(`/api/regions/geocode?query=${encodeURIComponent(q)}`);
+      const data = await resp.json();
+      const items = data.results || [];
+      if (!geocodeResultsList) return;
+      geocodeResultsList.innerHTML = "";
+
+      if (items.length === 0) {
+        geocodeResultsList.innerHTML = `<div style="color: var(--text-muted); font-size: 13px; text-align: center; padding: 12px;">Ничего не найдено. Уточните запрос (например, «Тамбовская область»).</div>`;
+        return;
+      }
+
+      items.forEach(item => {
+        const div = document.createElement("div");
+        div.className = "geocode-result-item";
+        div.innerHTML = `
+          <i class="fa-solid fa-map-pin"></i>
+          <div>
+            <strong>${item.name}</strong><br>
+            <span style="color: var(--text-muted); font-size: 11px;">Широта: ${item.lat.toFixed(3)}°, Долгота: ${item.lon.toFixed(3)}°</span>
+          </div>
+        `;
+        div.addEventListener("click", async () => {
+          if (customModal) customModal.classList.add("hidden");
+          await switchToCustomLocation(item);
+        });
+        geocodeResultsList.appendChild(div);
+      });
+    } catch (err) {
+      console.error("Ошибка геокодинга:", err);
+      showToast("Ошибка при поиске региона", true);
+    } finally {
+      if (doGeocodeBtn) doGeocodeBtn.innerHTML = `<i class="fa-solid fa-search"></i> Найти`;
+    }
+  }
+
+  if (doGeocodeBtn) {
+    doGeocodeBtn.addEventListener("click", executeGeocoding);
+  }
+  if (geocodeInput) {
+    geocodeInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        executeGeocoding();
+      }
+    });
+  }
+}
+
+// Переключение на регион из каталога с автоматическим поиском полей в нем
+async function switchRegion(regionId, showFlyToast = true) {
+  // Проверяем, выбрана ли пользовательская группа полей
+  if (regionId && regionId.startsWith("group_")) {
+    activeGroupId = regionId;
+    currentRegionId = regionId;
+    const group = customFieldGroups[regionId];
+    if (!group) return;
+
+    const regionSelect = document.getElementById("regionSelect");
+    if (regionSelect) regionSelect.value = regionId;
+
+    const deleteGroupBtn = document.getElementById("deleteGroupBtn");
+    if (deleteGroupBtn) deleteGroupBtn.disabled = false;
+
+    // 1. Очистка полей предыдущего региона/группы
+    clearPreviousRegionFields(group.name);
+
+    // 2. Обновление заголовка полей
+    const labelEl = document.getElementById("polygonSelectLabel");
+    if (labelEl) {
+      labelEl.innerHTML = `<i class="fa-solid fa-folder-open"></i> Поля группы (${group.name}):`;
+    }
+
+    const select = document.getElementById("polygonSelect");
+    const fields = group.fields || {};
+    const fieldKeys = Object.keys(fields);
+
+    if (fieldKeys.length === 0) {
+      if (select) {
+        select.innerHTML = `<option value="" disabled selected>— В группе «${group.name}» пока нет полей (нарисуйте на карте) —</option>`;
+      }
+      if (showFlyToast) {
+        showToast(`Выбрана группа «${group.name}». Нажмите «Нарисовать контур», чтобы добавить поле.`);
+      }
+      return;
+    }
+
+    if (select) select.innerHTML = "";
+    let firstFieldId = null;
+    const bounds = L.latLngBounds([]);
+
+    fieldKeys.forEach((fId, idx) => {
+      const f = fields[fId];
+      let layer = f.layer;
+      if (!layer && f.geojson) {
+        layer = L.geoJSON(f.geojson, {
+          style: () => ({
+            color: f.color || "#00f0ff",
+            weight: 3.5,
+            fillColor: f.color || "#00f0ff",
+            fillOpacity: 0.35,
+            className: "verified-field-path"
+          })
+        });
+        f.layer = layer;
+      }
+
+      if (layer) {
+        if (!map.hasLayer(layer)) {
+          drawnItems.addLayer(layer);
+        }
+        try { bounds.extend(layer.getBounds()); } catch (e) {}
+
+        layer.bindPopup(`
+          <div style="font-family: sans-serif; font-size: 13px; color: #111;">
+            <strong>📁 ${group.name}: ${f.name}</strong><br>
+            Площадь: <b>${Number(f.areaHa).toFixed(1)} га</b><br>
+            <span style="color: #0284c7; font-size: 11px;">Кликните на контур для запуска анализа</span>
+          </div>
+        `);
+
+        layer.on("click", () => {
+          userSavedFields[fId] = f;
+          activateAndAnalyzeField(fId);
+          showToast(`Поле выбрано: ${f.name}`);
+        });
+      }
+
+      userSavedFields[fId] = f;
+
+      const opt = document.createElement("option");
+      opt.value = fId;
+      opt.textContent = `● ${f.name} (${Number(f.areaHa).toFixed(1)} га)`;
+      select.appendChild(opt);
+
+      if (idx === 0) firstFieldId = fId;
+    });
+
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+    }
+
+    if (firstFieldId) {
+      activateAndAnalyzeField(firstFieldId);
+    }
+
+    if (showFlyToast) {
+      showToast(`Выбрана группа «${group.name}» (${fieldKeys.length} ${getRussianFieldCountWord(fieldKeys.length)}).`);
+    }
+    return;
+  }
+
+  // Если выбран официальный регион РФ или OSM-поиск
+  activeGroupId = null;
+  const deleteGroupBtn = document.getElementById("deleteGroupBtn");
+  if (deleteGroupBtn) deleteGroupBtn.disabled = true;
+  const region = regionsCatalog[regionId];
+  if (!region) return;
+
+  currentRegionId = regionId;
+  const regionSelect = document.getElementById("regionSelect");
+  if (regionSelect) regionSelect.value = regionId;
+
+  // 1. Плавный перелет карты к новому региону
+  map.flyTo([region.center_lat, region.center_lon], region.zoom || 11, {
+    animate: true,
+    duration: showFlyToast ? 1.5 : 0.5
+  });
+
+  if (showFlyToast) {
+    showToast(`🌾 Переход в регион: «${region.name}». Автопоиск полей...`);
+  }
+
+  // 2. Автоматический поиск и загрузка доступных с/х полей региона через OSM
+  await loadFarmlandsForBbox(region.bbox, region.name);
+}
+
+// Переключение на произвольную геокодированную локацию
+async function switchToCustomLocation(item) {
+  const shortName = item.name.split(',')[0].trim();
+  showToast(`🌾 Переход в регион: «${shortName}»...`);
+
+  // Добавляем найденный регион в каталог и выбираем его в селекторе
+  const customId = `custom_${shortName.toLowerCase().replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')}`;
+  regionsCatalog[customId] = {
+    id: customId,
+    name: shortName,
+    macro_region: "Географический поиск",
+    climate_zone: "Определяется широтой местности",
+    dominant_crops: ["зерновые", "масличные"],
+    center_lat: item.lat,
+    center_lon: item.lon,
+    zoom: 11,
+    bbox: item.bbox
+  };
+  currentRegionId = customId;
+
+  const regionSelect = document.getElementById("regionSelect");
+  if (regionSelect) {
+    let opt = regionSelect.querySelector(`option[value="${customId}"]`);
+    if (!opt) {
+      opt = document.createElement("option");
+      opt.value = customId;
+      opt.textContent = `📍 ${shortName}`;
+      regionSelect.appendChild(opt);
+    }
+    regionSelect.value = customId;
+  }
+
+  map.flyTo([item.lat, item.lon], 11, { animate: true, duration: 1.5 });
+  await loadFarmlandsForBbox(item.bbox, shortName);
+}
+
+// Функция полной очистки полей предыдущего региона
+function clearPreviousRegionFields(regionLabel = "") {
+  // 1. Удаляем с карты абсолютно все слои полей OSM предыдущего региона
+  Object.keys(osmFieldLayers).forEach(polyId => {
+    try {
+      if (osmFieldLayers[polyId]) {
+        map.removeLayer(osmFieldLayers[polyId]);
+      }
+    } catch (e) {}
+  });
+  osmFieldLayers = {};
+
+  // 2. Удаляем слои сохраненных полей из карты
+  Object.keys(userSavedFields).forEach(polyId => {
+    const f = userSavedFields[polyId];
+    if (f && f.layer) {
+      try {
+        if (drawnItems && drawnItems.hasLayer(f.layer)) {
+          drawnItems.removeLayer(f.layer);
+        }
+        map.removeLayer(f.layer);
+      } catch (e) {}
+    }
+  });
+
+  // Полностью очищаем коллекцию полей, чтобы в списке не оставалось полей прошлых регионов
+  userSavedFields = {};
+  selectedFieldId = null;
+
+  // 3. Очищаем выпадающий список (#polygonSelect)
+  const select = document.getElementById("polygonSelect");
+  if (select) {
+    select.innerHTML = regionLabel 
+      ? `<option value="" disabled selected>— Загрузка полей (${regionLabel})... —</option>`
+      : '<option value="" disabled selected>— Загрузка полей региона... —</option>';
+  }
+
+  // 4. Обновляем метку в шапке
+  const labelEl = document.getElementById("polygonSelectLabel");
+  if (labelEl) {
+    labelEl.innerHTML = `<i class="fa-solid fa-map-pin"></i> Поля группы${regionLabel ? ` (${regionLabel})` : ''}:`;
+  }
+
+  // 5. Блокируем кнопку настроек и удаления поля до выбора нового контура
+  const editFieldBtn = document.getElementById("editFieldBtn");
+  if (editFieldBtn) editFieldBtn.disabled = true;
+  const deleteFieldBtn = document.getElementById("deleteFieldBtn");
+  if (deleteFieldBtn) deleteFieldBtn.disabled = true;
+}
+
+// Загрузка контуров полей для Bounding Box с регистрацией и запуском анализа
+async function loadFarmlandsForBbox(bbox, regionLabel) {
+  if (!bbox || bbox.length < 4) return;
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+
+  // 1. Полная очистка полей прошлого региона (слои на карте, список в селекторе, объект userSavedFields)
+  clearPreviousRegionFields(regionLabel);
+
+  const select = document.getElementById("polygonSelect");
+
+  try {
+    const resp = await fetch(`/api/osm-farmlands?min_lon=${minLon}&min_lat=${minLat}&max_lon=${maxLon}&max_lat=${maxLat}&limit=15`);
+    const data = await resp.json();
+    const features = data.features || [];
+
+    if (features.length === 0) {
+      if (select) {
+        select.innerHTML = `<option value="" disabled selected>— В регионе «${regionLabel}» нет полей в OSM —</option>`;
+      }
+      showToast(`В границах региона «${regionLabel}» контуры OSM не найдены. Нарисуйте поле вручную кнопкой «Нарисовать контур».`, true);
+      return;
+    }
+
+    // Очищаем временный плейсхолдер перед добавлением полей текущего региона
+    if (select) {
+      select.innerHTML = "";
+    }
+
+    let firstFieldId = null;
+
+    features.forEach((f, idx) => {
+      const polyId = f.properties.anon_polygon_id || `OSM-${idx + 1}`;
+      const coords = f.geometry.coordinates[0];
+      let sumLat = 0, sumLon = 0;
+      coords.forEach(pt => { sumLon += pt[0]; sumLat += pt[1]; });
+      const cLat = sumLat / coords.length;
+      const cLon = sumLon / coords.length;
+      const areaHa = f.properties.area_ha || calculatePolygonAreaHa(coords);
+
+      const layer = L.geoJSON(f, {
+        style: () => ({
+          color: "#10b981",
+          weight: 2,
+          fillColor: "#10b981",
+          fillOpacity: 0.28,
+          className: "verified-field-path"
+        })
+      }).addTo(map);
+
+      osmFieldLayers[polyId] = layer;
+
+      const shortTitle = (f.properties.name && !f.properties.name.startsWith("Поле OSM")) ? f.properties.name : `Поле #${idx + 1}`;
+      const fieldFullName = `${regionLabel}: ${shortTitle}`;
+
+      layer.bindPopup(`
+        <div style="font-family: sans-serif; font-size: 13px; color: #111;">
+          <strong>${fieldFullName}</strong><br>
+          Регион: <b>${regionLabel}</b><br>
+          Культура: <b>${f.properties.crop_type || 'зерновые'}</b><br>
+          Площадь: <b>${areaHa} га</b><br>
+          <span style="color: #0284c7; font-size: 11px;">Кликните на контур поля для запуска анализа</span>
+        </div>
+      `);
+
+      layer.on("click", () => {
+        registerCustomField(polyId, fieldFullName, "#10b981", f, areaHa, cLat, cLon, layer);
+        activateAndAnalyzeField(polyId);
+        showToast(`Поле выбрано: ${fieldFullName}`);
+      });
+
+      // Автоматическая регистрация поля только для текущего выбранного региона
+      registerCustomField(polyId, fieldFullName, "#10b981", f, areaHa, cLat, cLon, layer);
+
+      if (idx === 0) {
+        firstFieldId = polyId;
+      }
+    });
+
+    showToast(`Найдено ${features.length} полей региона «${regionLabel}».`);
+
+    // Автоматический запуск анализа первого поля для мгновенной отдачи результата
+    if (firstFieldId && userSavedFields[firstFieldId]) {
+      activateAndAnalyzeField(firstFieldId);
+    }
+  } catch (err) {
+    console.error("Ошибка автопоиска полей региона:", err);
+    if (select) {
+      select.innerHTML = `<option value="" disabled selected>— Ошибка загрузки полей региона —</option>`;
+    }
+  }
+}
+
+// Открытие модального окна сводной аналитики региона
+async function openRegionSummaryModal(regionId) {
+  const modal = document.getElementById("regionSummaryModal");
+  if (!modal) return;
+
+  const titleEl = document.getElementById("regModalTitle");
+  const macroEl = document.getElementById("regMacroRegion");
+  const climEl = document.getElementById("regClimateZone");
+  const cropsEl = document.getElementById("regDominantCrops");
+  const meanTempEl = document.getElementById("regMeanTemp");
+  const maxTempEl = document.getElementById("regMaxTemp");
+  const precipEl = document.getElementById("regPrecip");
+  const gtkEl = document.getElementById("regGtk");
+  const moistEl = document.getElementById("regMoistureStatus");
+  const riskEl = document.getElementById("regRiskLevel");
+  const discFieldsEl = document.getElementById("regDiscoveredFields");
+
+  const notesBanner = document.getElementById("regGroupNotesBanner");
+  const notesText = document.getElementById("regGroupNotesText");
+
+  // Обработка пользовательской группы полей
+  if (regionId && regionId.startsWith("group_")) {
+    const grp = customFieldGroups[regionId];
+    if (!grp) return;
+    const fieldCount = Object.keys(grp.fields || {}).length;
+    let totalArea = 0;
+    Object.values(grp.fields || {}).forEach(f => { totalArea += (Number(f.areaHa) || 0); });
+
+    if (titleEl) titleEl.textContent = `Группа полей: ${grp.name}`;
+    if (macroEl) macroEl.textContent = grp.desc || "Пользовательская группа полей";
+    if (climEl) climEl.textContent = "Локальный агрономический кластер";
+    if (cropsEl) cropsEl.textContent = "Определяется культурами полей группы";
+    if (meanTempEl) meanTempEl.textContent = "Мониторинг группы";
+    if (maxTempEl) maxTempEl.textContent = `Полей: ${fieldCount}`;
+    if (precipEl) precipEl.textContent = `Суммарная площадь: ${totalArea.toFixed(1)} га`;
+    if (gtkEl) gtkEl.textContent = "Кластерный расчет";
+    if (moistEl) moistEl.textContent = "Штатный режим группы";
+    if (riskEl) {
+      riskEl.textContent = "Штатный";
+      riskEl.className = "region-kpi-value normal";
+    }
+    if (discFieldsEl) discFieldsEl.textContent = `${fieldCount} ${getRussianFieldCountWord(fieldCount)} в группе`;
+
+    // Отображаем примечание к группе в сводном анализе
+    if (notesBanner && notesText) {
+      notesBanner.classList.remove("hidden");
+      notesText.textContent = grp.desc ? grp.desc : "Примечание не указано";
+    }
+
+    modal.classList.remove("hidden");
+    return;
+  }
+
+  // Для обычных регионов РФ скрываем блок примечания
+  if (notesBanner) {
+    notesBanner.classList.add("hidden");
+  }
+
+  const regionInfo = regionsCatalog[regionId] || { name: regionId };
+  if (titleEl) titleEl.textContent = `Агроклиматическая сводка: ${regionInfo.name}`;
+  if (macroEl) macroEl.textContent = regionInfo.macro_region || "Определение...";
+  if (climEl) climEl.textContent = regionInfo.climate_zone || "Определение...";
+  if (cropsEl) cropsEl.textContent = (regionInfo.dominant_crops || []).join(", ") || "зерновые";
+  if (meanTempEl) meanTempEl.textContent = "Загрузка...";
+  if (maxTempEl) maxTempEl.textContent = "Макс: -- °C";
+  if (precipEl) precipEl.textContent = "Загрузка...";
+  if (gtkEl) gtkEl.textContent = "Расчет...";
+  if (moistEl) moistEl.textContent = "Запрос метеорологии ERA5...";
+  if (riskEl) {
+    riskEl.textContent = "Оценка...";
+    riskEl.className = "region-kpi-value";
+  }
+  if (discFieldsEl) discFieldsEl.textContent = "Поиск полей...";
+
+  // Показываем окно мгновенно по клику
+  modal.classList.remove("hidden");
+
+  const startInput = document.getElementById("startDateInput");
+  const endInput = document.getElementById("endDateInput");
+  const sIso = formatDateToIso(startInput ? startInput.value : selectedStartDate);
+  const eIso = formatDateToIso(endInput ? endInput.value : selectedEndDate);
+
+  try {
+    const resp = await fetch(`/api/regions/${regionId}/summary?start_date=${sIso}&end_date=${eIso}`);
+    if (!resp.ok) throw new Error("Ошибка получения сводки");
+    const data = await resp.json();
+
+    if (titleEl) titleEl.textContent = `Агроклиматическая сводка: ${data.region.name}`;
+    if (macroEl) macroEl.textContent = data.region.macro_region;
+    if (climEl) climEl.textContent = data.region.climate_zone;
+    if (cropsEl) cropsEl.textContent = (data.region.dominant_crops || []).join(", ");
+    if (meanTempEl) meanTempEl.textContent = `${data.weather.mean_temp_c} °C`;
+    if (maxTempEl) maxTempEl.textContent = `Макс: ${data.weather.max_temp_c} °C`;
+    if (precipEl) precipEl.textContent = `${data.weather.total_precip_mm} мм`;
+    if (gtkEl) gtkEl.textContent = `ГТК = ${data.weather.gtk_index}`;
+    if (moistEl) moistEl.textContent = data.weather.moisture_status;
+    if (riskEl) {
+      riskEl.textContent = data.weather.risk_level;
+      riskEl.className = `region-kpi-value ${data.weather.risk_level === 'Критический' ? 'text-rose' : (data.weather.risk_level.includes('Повышенный') ? 'text-amber' : 'text-emerald')}`;
+    }
+    if (discFieldsEl) discFieldsEl.textContent = `Найдено с/х угодий: ${data.discovered_fields_count}`;
+  } catch (e) {
+    console.error("Ошибка загрузки сводки региона:", e);
+    showToast("Не удалось загрузить подробную метеосводку региона.", true);
+    if (moistEl) moistEl.textContent = "Метеосервис временно недоступен";
+  }
+}
+
 // 4. Register and Manage Custom Fields
 function registerCustomField(id, name, color, geojson, areaHa, centerLat, centerLon, layer) {
   const select = document.getElementById("polygonSelect");
   color = color || "#00f0ff";
 
   if (!userSavedFields[id]) {
-    // If it's the first added field, clear placeholder
-    if (Object.keys(userSavedFields).length === 0) {
+    // If it's the first added field or placeholder is present, clear placeholder
+    if (select && (Object.keys(userSavedFields).length === 0 || select.querySelector('option[disabled]'))) {
       select.innerHTML = "";
     }
 
@@ -832,9 +1832,11 @@ async function activateAndAnalyzeField(fieldId) {
   const field = userSavedFields[fieldId];
   if (!field) return;
 
-  // Enable Edit button
+  // Enable Edit and Delete buttons
   const editFieldBtn = document.getElementById("editFieldBtn");
   if (editFieldBtn) editFieldBtn.disabled = false;
+  const deleteFieldBtn = document.getElementById("deleteFieldBtn");
+  if (deleteFieldBtn) deleteFieldBtn.disabled = false;
 
   // Zoom map to active field
   if (field.layer) {
@@ -931,9 +1933,12 @@ async function analyzeCustomPolygon(field) {
     const crop = document.getElementById("cropSelect").value || "озимая пшеница";
     const startInput = document.getElementById("startDateInput");
     const endInput = document.getElementById("endDateInput");
-    const startDate = startInput ? startInput.value : selectedStartDate;
-    const endDate = endInput ? endInput.value : selectedEndDate;
-    const yr = startDate ? parseInt(startDate.slice(0, 4)) : 2026;
+    const startDateRaw = startInput ? startInput.value : selectedStartDate;
+    const endDateRaw = endInput ? endInput.value : selectedEndDate;
+    // Преобразование даты к каноническому формату ISO (ГГГГ-ММ-ДД) для API бэкенда
+    const startDateIso = formatDateToIso(startDateRaw);
+    const endDateIso = formatDateToIso(endDateRaw);
+    const yr = startDateIso ? parseInt(startDateIso.slice(0, 4)) : 2026;
     
     document.getElementById("statusText").textContent = "Анализ ДЗЗ и погоды...";
     
@@ -944,8 +1949,8 @@ async function analyzeCustomPolygon(field) {
         geometry: field.geojson.geometry,
         crop_type: crop,
         year: yr,
-        start_date: startDate,
-        end_date: endDate
+        start_date: startDateIso,
+        end_date: endDateIso
       })
     });
     
@@ -1075,10 +2080,20 @@ function openFieldModal(ctx) {
 
   if (!modal) return;
 
+  const deleteModalBtn = document.getElementById("deleteFieldModalBtn");
   if (ctx.isNew) {
     titleEl.innerHTML = `<i class="fa-solid fa-plus-circle"></i> Сохранить новое поле`;
+    if (deleteModalBtn) deleteModalBtn.style.display = "none";
   } else {
     titleEl.innerHTML = `<i class="fa-solid fa-palette"></i> Настройка поля`;
+    if (deleteModalBtn) {
+      deleteModalBtn.style.display = "inline-flex";
+      deleteModalBtn.onclick = () => {
+        if (currentModalContext && currentModalContext.id) {
+          deleteSelectedField(currentModalContext.id);
+        }
+      };
+    }
   }
 
   nameInput.value = ctx.name || ctx.defaultName || "";
@@ -1154,6 +2169,25 @@ function saveFieldFromModal() {
       currentModalContext.centerLon,
       currentModalContext.layer
     );
+
+    // Если сейчас активна пользовательская группа полей, привязываем поле к группе
+    if (activeGroupId && customFieldGroups[activeGroupId]) {
+      const group = customFieldGroups[activeGroupId];
+      if (!group.fields) group.fields = {};
+      group.fields[fieldId] = {
+        id: fieldId,
+        name: chosenName,
+        color: chosenColor,
+        geojson: currentModalContext.geojson,
+        areaHa: currentModalContext.areaHa,
+        centerLat: currentModalContext.centerLat,
+        centerLon: currentModalContext.centerLon,
+        layer: currentModalContext.layer
+      };
+      saveGroupsToStorage();
+      renderGroupsInRegionSelect();
+    }
+
     activateAndAnalyzeField(fieldId);
     showToast(`Поле «${chosenName}» сохранено и принято в обработку!`);
   } else {
@@ -1163,6 +2197,14 @@ function saveFieldFromModal() {
     if (field) {
       field.name = chosenName;
       field.color = chosenColor;
+
+      // Если поле принадлежит активной группе, обновляем в группе
+      if (activeGroupId && customFieldGroups[activeGroupId] && customFieldGroups[activeGroupId].fields && customFieldGroups[activeGroupId].fields[fieldId]) {
+        customFieldGroups[activeGroupId].fields[fieldId].name = chosenName;
+        customFieldGroups[activeGroupId].fields[fieldId].color = chosenColor;
+        saveGroupsToStorage();
+        renderGroupsInRegionSelect();
+      }
 
       // Update dropdown option text
       const select = document.getElementById("polygonSelect");
@@ -1330,6 +2372,11 @@ function renderCharts(ts) {
   const temps = ts.map(r => r.temp_c);
   const precips = ts.map(r => r.precip_mm);
 
+  // Динамический расчет нижней границы шкалы NDVI с запасом для зимних наблюдений со снегом
+  const allNdviVals = [...recLine, ...s2Points, ...lsPoints, ...modPoints].filter(v => v !== null && !isNaN(v));
+  const minObservedNdvi = allNdviVals.length > 0 ? Math.min(...allNdviVals) : 0.0;
+  const yAxisMin = minObservedNdvi < -0.01 ? Math.max(-0.2, Math.floor((minObservedNdvi - 0.05) * 10) / 10) : 0.0;
+
   // Determine span: multi-year or single-year
   const multiYearSpan = ts.length > 0 && (ts[0].date.slice(0, 4) !== ts[ts.length - 1].date.slice(0, 4));
   const tickLimit = daysCount <= 15 ? daysCount : (daysCount <= 45 ? 15 : 12);
@@ -1479,7 +2526,7 @@ function renderCharts(ts) {
           callbacks: {
             title: (items) => {
               if (!items || !items.length) return '';
-              return `📅 Дата: ${items[0].label}`;
+              return `📅 Дата: ${formatDateToRu(items[0].label)}`;
             },
             label: (item) => {
               if (item.raw === null || item.raw === undefined || isNaN(item.raw)) return null;
@@ -1500,7 +2547,7 @@ function renderCharts(ts) {
           }
         },
         y: {
-          min: 0.0,
+          min: yAxisMin,
           max: 1.0,
           grid: { color: 'rgba(255, 255, 255, 0.05)' },
           ticks: { color: '#9ca3af', font: { size: 11 } }
@@ -1556,7 +2603,7 @@ function renderCharts(ts) {
           callbacks: {
             title: (items) => {
               if (!items || !items.length) return '';
-              return `📅 Дата: ${items[0].label}`;
+              return `📅 Дата: ${formatDateToRu(items[0].label)}`;
             },
             label: (item) => {
               if (item.raw === null || item.raw === undefined || isNaN(item.raw)) return null;
@@ -1619,7 +2666,7 @@ function renderAnomalies(anomalies) {
     card.innerHTML = `
       <div class="anomaly-card-header">
         <span class="anomaly-date-badge">
-          <i class="fa-regular fa-calendar"></i> ${a.start_date} &mdash; ${a.end_date} (${a.duration_days} дн.)
+          <i class="fa-regular fa-calendar"></i> ${formatDateToRu(a.start_date)} &mdash; ${formatDateToRu(a.end_date)} (${a.duration_days} дн.)
         </span>
         <span class="anomaly-zscore-badge">Z: ${a.min_zscore} σ (${a.status})</span>
       </div>
@@ -1728,6 +2775,7 @@ function openPassportModal() {
   // Заполнение шапки и сводных учетных параметров
   const regEl = document.getElementById("docRegNumber");
   const genEl = document.getElementById("docGeneratedAt");
+  const calHeaderEl = document.getElementById("docCalendarPeriodHeader");
   const nameEl = document.getElementById("docFieldName");
   const cropEl = document.getElementById("docCropType");
   const areaEl = document.getElementById("docArea");
@@ -1738,13 +2786,23 @@ function openPassportModal() {
   const gapsEl = document.getElementById("docGapsCount");
   const signDateEl = document.getElementById("docSignDate");
 
+  // Определение актуального периода календаря (с проверкой input и fallback на selectedStartDate/EndDate)
+  const startInput = document.getElementById("startDateInput");
+  const endInput = document.getElementById("endDateInput");
+  const sRu = (startInput && startInput.value) ? startInput.value.trim() : formatDateToRu(selectedStartDate);
+  const eRu = (endInput && endInput.value) ? endInput.value.trim() : formatDateToRu(selectedEndDate);
+  const daysCount = timeseries.length;
+  const calPeriodStr = `с ${sRu} по ${eRu}`;
+  const calPeriodWithDays = `с ${sRu} по ${eRu} (${daysCount} календарных дней)`;
+
   if (regEl) regEl.textContent = regNumber;
   if (genEl) genEl.textContent = formattedDate;
+  if (calHeaderEl) calHeaderEl.textContent = `${calPeriodStr} (${daysCount} дн.)`;
   if (nameEl) nameEl.textContent = field.name || field.id || "Пользовательский контур";
   if (cropEl) cropEl.textContent = kpis.crop_type || "Зерновые культуры";
   if (areaEl) areaEl.textContent = `${Number(field.areaHa || 0).toFixed(1)} га`;
   if (centroidEl) centroidEl.textContent = `${Number(field.centerLat || 0).toFixed(4)}° N, ${Number(field.centerLon || 0).toFixed(4)}° E`;
-  if (periodEl) periodEl.textContent = `${selectedStartDate} — ${selectedEndDate} (${timeseries.length} календарных дней)`;
+  if (periodEl) periodEl.textContent = calPeriodWithDays;
   if (statusEl) statusEl.textContent = kpis.current_status || "Штатное развитие";
   if (ndviZEl) {
     const ndviVal = Number(kpis.current_ndvi || 0).toFixed(3);
@@ -1795,7 +2853,7 @@ function openPassportModal() {
         const statusClass = isCritical ? "text-rose" : "text-amber";
         tableHtml += `
           <tr>
-            <td><strong>${a.start_date} &mdash; ${a.end_date}</strong></td>
+            <td><strong>${formatDateToRu(a.start_date)} &mdash; ${formatDateToRu(a.end_date)}</strong></td>
             <td>${a.duration_days} дн.</td>
             <td><span class="${statusClass}"><strong>${a.min_zscore} σ</strong> (${a.status})</span></td>
             <td>${a.primary_cause || "Гидротермический стресс"}</td>
@@ -1951,8 +3009,8 @@ async function exportPassportGeoJson() {
       anomalies: data.anomalies || [],
       directives: data.directives || [],
       period: {
-        start_date: selectedStartDate,
-        end_date: selectedEndDate
+        start_date: formatDateToRu(selectedStartDate),
+        end_date: formatDateToRu(selectedEndDate)
       }
     };
 
@@ -1968,7 +3026,7 @@ async function exportPassportGeoJson() {
 
     const geojsonData = await resp.json();
     const safeName = (field.name || field.id).replace(/[^\wа-яА-ЯёЁ-]/g, '_');
-    const filename = `Паспорт_${safeName}_${selectedStartDate}_${selectedEndDate}.geojson`;
+    const filename = `Паспорт_${safeName}_${formatDateToRu(selectedStartDate)}_${formatDateToRu(selectedEndDate)}.geojson`;
     downloadBlob(JSON.stringify(geojsonData, null, 2), filename, "application/geo+json;charset=utf-8;");
     showToast(`Файл «${filename}» успешно сформирован и загружен!`);
   } catch (err) {

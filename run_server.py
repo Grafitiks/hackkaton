@@ -37,4 +37,4 @@ if __name__ == "__main__":
     print(f"Документация API:      http://localhost:{port}/docs")
     print("==================================================")
     
-    uvicorn.run("src.web.app:app", host=args.host, port=port, reload=False)
+    uvicorn.run("src.web.app:app", host=args.host, port=port, reload=True)

@@ -123,6 +123,26 @@ body {
   box-shadow: 0 0 8px rgba(0, 240, 255, 0.2);
 }
 
+optgroup {
+  background: #111927;
+  color: #94a3b8;
+  font-weight: 700;
+  font-size: 11px;
+  padding: 4px 0;
+}
+
+optgroup option {
+  background: #162032;
+  color: var(--text-primary);
+  font-weight: 400;
+  font-size: 13px;
+  padding: 4px 8px;
+}
+
+#customGroupsOptgroup {
+  color: var(--accent-cyan);
+}
+
 .select-with-btn {
   display: flex;
   align-items: center;
@@ -168,7 +188,7 @@ body {
   padding: 4px 2px;
   outline: none;
   cursor: text;
-  width: 84px;
+  width: 92px;
   text-align: center;
 }
 
@@ -1342,7 +1362,7 @@ span.flatpickr-weekday {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
@@ -1350,8 +1370,11 @@ span.flatpickr-weekday {
   z-index: 2000;
 }
 
-.modal-backdrop.hidden {
-  display: none;
+.modal-backdrop.hidden,
+.modal-overlay.hidden,
+.hidden {
+  display: none !important;
+  pointer-events: none !important;
 }
 
 .modal-card {
@@ -2123,3 +2146,146 @@ span.flatpickr-weekday {
     color: #111827 !important;
   }
 }
+
+/* ============================================================================
+   РЕГИОНАЛЬНЫЙ АГРОМОНИТОРИНГ И ПОИСК РЕГИОНОВ (UI СТИЛИ)
+   ============================================================================ */
+
+.region-summary-modal-card {
+  max-width: 680px;
+  width: 92%;
+}
+
+.region-meta-banner {
+  background: rgba(22, 32, 50, 0.75);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.region-meta-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.region-meta-label {
+  color: var(--text-secondary);
+}
+
+.region-meta-val {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.region-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.region-kpi-card {
+  background: #162032;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+
+.region-kpi-title {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.region-kpi-value {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.region-kpi-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.region-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.custom-region-modal-card {
+  max-width: 580px;
+  width: 90%;
+}
+
+.geocode-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.geocode-result-item {
+  padding: 10px 12px;
+  background: #162032;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.geocode-result-item:hover {
+  border-color: var(--accent-cyan);
+  background: rgba(0, 240, 255, 0.08);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.15);
+}
+
+.geocode-result-item i {
+  color: var(--accent-cyan);
+  font-size: 15px;
+}
+
+.btn-delete-danger:hover:not(:disabled) {
+  color: #f43f5e !important;
+  border-color: rgba(244, 63, 94, 0.5) !important;
+  background: rgba(244, 63, 94, 0.15) !important;
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.25) !important;
+}
+
+.btn-danger {
+  background: rgba(244, 63, 94, 0.15);
+  color: #f43f5e;
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(244, 63, 94, 0.28);
+  border-color: #f43f5e;
+  color: #fff;
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.35);
+}
+
+

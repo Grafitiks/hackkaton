@@ -1,0 +1,25 @@
+version: '3.8'
+
+# ============================================================================
+# ДЕМОНСТРАЦИОННЫЙ ЗАПУСК ДЛЯ ЖЮРИ ХАКАТОНА ОДНОЙ КОМАНДОЙ:
+#   docker compose up --build
+# ============================================================================
+
+services:
+  geo-vega-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: geo-vega-dashboard
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PORT=8000
+      - HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/batch-status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
