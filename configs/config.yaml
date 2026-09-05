@@ -1,0 +1,70 @@
+# ============================================================================
+# GEO-VEGA // КОСМОХАКАТОН 2026: КОНФИГУРАЦИЯ СИСТЕМЫ
+# ============================================================================
+
+project:
+  name: "GEO-VEGA"
+  description: "Мониторинг вегетационной динамики с/х территорий, реконструкция рядов ДЗЗ и детекция аномалий"
+  version: "1.0.0"
+  random_seed: 42
+
+# Пути к данным соревнования
+data:
+  train_dataset: "data/train_dataset.csv"
+  test_features: "data/test_features (1).csv"
+  private_features: "data/private_features.csv"
+  polygons_geo: "src/web/polygons_geo.json"
+  submission_output: "submission.csv"
+
+# Пути к сериализованным моделям и артефактам
+artifacts:
+  models_dir: "artifacts/models"
+  ensemble_models: "artifacts/models/ensemble_models.pkl"
+  climatology: "artifacts/models/climatology.pkl"
+
+# Конфигурация модели и ансамбля
+model:
+  n_splits: 5
+  group_column: "anon_polygon_id"
+  target_column: "primary_ndvi"
+  synthetic_gap_column: "is_synthetic_gap"
+  lgb_weight: 0.60
+  cat_weight: 0.40
+  lgb_params:
+    objective: "huber"
+    huber_alpha: 0.90
+    learning_rate: 0.04
+    n_estimators: 450
+    num_leaves: 31
+    min_child_samples: 20
+    subsample: 0.85
+    colsample_bytree: 0.85
+    random_state: 42
+    verbose: -1
+  cat_params:
+    loss_function: "Huber:delta=0.08"
+    iterations: 500
+    learning_rate: 0.05
+    depth: 6
+    random_seed: 42
+    verbose: 0
+
+# Конфигурация модуля детекции и интерпретации аномалий
+anomalies:
+  zscore_thresholds:
+    normal_min: -1.0          # Z >= -1.0: Штатное развитие
+    moderate_min: -2.0        # -2.0 <= Z < -1.0: Угнетение биомассы
+    critical_max: -2.0        # Z < -2.0: Критическая аномалия
+  safe_std_floor: 0.06        # Защита от деления на ноль при вырожденной дисперсии климатологии
+  agronomic_rules:
+    heat_stress_temp_peak: 32.0   # Максимальная суточная температура теплового шока (°C)
+    heat_stress_temp_avg: 28.0    # Средняя температура теплового шока (°C)
+    drought_precip_7d: 5.0        # Порог острой засухи (мм за 7 дней)
+    drought_precip_14d: 15.0      # Порог умеренного дефицита влаги (мм за 14 дней)
+    ndwi_water_stress: -0.20      # Порог дефицита влагосодержания листьев по NDWI
+
+# Сетевые настройки веб-сервера
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false

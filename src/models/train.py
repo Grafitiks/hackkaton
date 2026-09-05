@@ -61,7 +61,7 @@ def run_training():
     df_train = df_train.sort_values(['anon_polygon_id', 'date_dt']).reset_index(drop=True)
     
     dfs_for_calendar = [df_train]
-    for extra_p in ["data/private_features.csv", "test_features (1).csv", r"C:\Users\Артем\Downloads\Telegram Desktop\test_features (1).csv"]:
+    for extra_p in ["data/private_features.csv", "data/test_features.csv", "data/test_features (1).csv", "test_features.csv"]:
         if os.path.exists(extra_p):
             ex_df = pd.read_csv(extra_p, encoding='utf-8')
             ex_df['date_dt'] = pd.to_datetime(ex_df['date'])

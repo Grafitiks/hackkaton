@@ -7,7 +7,7 @@ import numpy as np
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 sys.stdout.reconfigure(encoding='utf-8')
-project_root = r"c:\Users\Артем\Desktop\hackkaton"
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 os.chdir(project_root)
 sys.path.append(project_root)
 
@@ -21,9 +21,8 @@ def run():
     print("ПРОВЕРКА НОВОЙ МОДЕЛИ НА ДАТАСЕТЕ test_features (1).csv (ЗАДАЧА 1)")
     print("=" * 80)
 
-    raw_path = r"test_features (1).csv"
-    if not os.path.exists(raw_path):
-        raw_path = r"C:\Users\Артем\Downloads\Telegram Desktop\test_features (1).csv"
+    candidates = ["data/test_features.csv", "data/test_features (1).csv", "test_features.csv", "test_features (1).csv"]
+    raw_path = next((c for c in candidates if os.path.exists(c)), "data/test_features.csv")
     if not os.path.exists(raw_path):
         print(f"Файл {raw_path} не найден!")
         return

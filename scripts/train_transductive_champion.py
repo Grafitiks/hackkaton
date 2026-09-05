@@ -394,7 +394,7 @@ with open("artifacts/models/ensemble_models.pkl", "wb") as f:
 print("[OK] Models bundle saved to artifacts/models/ensemble_models.pkl")
 
 # 9. Оценка качества на test_features (1).csv (2500 контрольных точек)
-df1 = pd.read_csv(r"C:\Users\Артем\Downloads\Telegram Desktop\test_features (1).csv")
+df1 = pd.read_csv(r"data/test_features.csv")
 df1['date_dt'] = pd.to_datetime(df1['date'])
 df1['year'] = df1['date_dt'].dt.year
 df1['doy'] = df1['date_dt'].dt.dayofyear

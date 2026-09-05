@@ -31,12 +31,13 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
-# Копирование исходного кода, весов моделей, данных и сабмита
+# Копирование исходного кода, весов моделей, конфигураций и скриптов
+COPY configs/ ./configs/
 COPY src/ ./src/
 COPY data/ ./data/
 COPY artifacts/ ./artifacts/
-COPY run_server.py predict_submission.py setup_gee.py ./
-COPY submission*.csv ./
+COPY run_server.py predict_submission.py predict.py train.py detect_anomalies.py setup_gee.py ./
+COPY submission*.csv pyproject.toml environment.yml ./
 
 # Экспорт сетевого порта веб-интерфейса и REST API
 EXPOSE 8000
