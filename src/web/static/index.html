@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GEO-VEGA // Космохакатон: Мониторинг вегетации с/х полей</title>
+  
+  <!-- Fonts & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Leaflet CSS & Leaflet Draw -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="styles.css">
+  
+  <!-- Chart.js & Zoom Plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+
+  <!-- Flatpickr (Custom Cyber-Agro Calendar) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo-badge">
+        <i class="fa-solid fa-satellite-dish"></i>
+      </div>
+      <div class="app-title-group">
+        <div class="app-name">GEO-VEGA <span class="tag-version">v1.0 ML</span></div>
+        <div class="app-subtitle">Космохакатон: Мониторинг вегетационной динамики и детекция аномалий</div>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <div class="control-item">
+        <label><i class="fa-solid fa-map-pin"></i> Сохраненные поля:</label>
+        <div class="select-with-btn">
+          <select id="polygonSelect" class="form-select">
+            <option value="" disabled selected>— Нет полей (нарисуйте на карте или найдите в OSM) —</option>
+          </select>
+          <button id="editFieldBtn" class="btn-icon-control" title="Настроить название и цвет активного поля" disabled>
+            <i class="fa-solid fa-palette"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="control-item date-range-control">
+        <label><i class="fa-regular fa-calendar-days"></i> Период дат:</label>
+        <div class="date-range-group">
+          <input type="text" id="startDateInput" class="form-date-input" placeholder="ГГГГ-ММ-ДД" title="Начальная дата (введите с клавиатуры или выберите в календаре)" value="2026-01-01" maxlength="10">
+          <span class="date-sep">—</span>
+          <input type="text" id="endDateInput" class="form-date-input" placeholder="ГГГГ-ММ-ДД" title="Конечная дата (введите с клавиатуры или выберите в календаре)" value="2026-09-05" maxlength="10">
+          <button id="applyDateBtn" class="btn-icon-control btn-apply-dates" title="Применить даты и обновить спутниковый анализ">
+            <i class="fa-solid fa-arrow-rotate-right"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="control-item">
+        <label><i class="fa-solid fa-wheat-awn"></i> Культура:</label>
+        <select id="cropSelect" class="form-select">
+          <option value="озимая пшеница">Озимая пшеница</option>
+          <option value="подсолнечник">Подсолнечник</option>
+          <option value="зерновые">Зерновые</option>
+          <option value="пастбища/зерновые">Пастбища / зерновые</option>
+        </select>
+      </div>
+
+      <button id="drawModeBtn" class="btn btn-secondary">
+        <i class="fa-solid fa-draw-polygon"></i> Нарисовать контур
+      </button>
+
+      <button id="batchModalBtn" class="btn btn-primary">
+        <i class="fa-solid fa-file-arrow-down"></i> Batch-инференс
+      </button>
+    </div>
+  </header>
+
+  <!-- KPI Metrics Banner -->
+  <section class="kpi-strip">
+    <div class="kpi-card">
+      <div class="kpi-label">Текущий статус поля</div>
+      <div class="kpi-value-row">
+        <div id="statusIndicator" class="status-beacon normal"></div>
+        <div id="statusText" class="kpi-value">Ожидание выбора поля</div>
+      </div>
+      <div id="statusSub" class="kpi-sub">Нарисуйте контур или выберите в OSM</div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label">Геокоординаты (WGS-84)</div>
+      <div class="kpi-value-row">
+        <div id="geoCoordsText" class="kpi-value highlight-cyan" style="font-size: 15px;">53.250° N, 50.250° E</div>
+      </div>
+      <div id="areaSub" class="kpi-sub">Площадь: -- га</div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label">Вегетационный индекс NDVI</div>
+      <div class="kpi-value-row">
+        <div id="currentNdvi" class="kpi-value highlight-cyan">--</div>
+      </div>
+      <div id="cropTypeSub" class="kpi-sub">Культура: --</div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label">Отклонение Z-Score</div>
+      <div class="kpi-value-row">
+        <div id="currentZscore" class="kpi-value">-- σ</div>
+      </div>
+      <div class="kpi-sub">Норма: Z &ge; -1.0 | Стресс: &lt; -1.0</div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label">Восстановлено пропусков</div>
+      <div class="kpi-value-row">
+        <div id="gapsCount" class="kpi-value highlight-purple">--</div>
+        <span class="kpi-unit">точек</span>
+      </div>
+      <div class="kpi-sub">Ансамбль LightGBM + CatBoost</div>
+    </div>
+  </section>
+
+  <!-- Drawing Mode Guide Banner -->
+  <div id="drawingGuideBanner" class="drawing-guide-banner hidden">
+    <span class="glow-dot"></span>
+    <span><strong>Режим контурирования:</strong> Нарисуйте полигон любого аграрного поля на карте кликами мыши, замкните контур двойным кликом.</span>
+  </div>
+
+  <!-- Cursor Tooltip & Toast Alert -->
+  <div id="cursorGeoTooltip" class="cursor-geo-tooltip hidden">
+    <i class="fa-solid fa-satellite"></i> <span>Глобальное покрытие GEE активно</span>
+  </div>
+  <div id="appToast" class="app-toast hidden">
+    <i class="fa-solid fa-circle-exclamation"></i>
+    <span id="toastMsg">Сообщение</span>
+  </div>
+
+  <!-- Main Split Content: Map & Analytics -->
+  <main class="main-layout">
+    <!-- Left Column: Map -->
+    <section class="map-column">
+      <div class="panel-header">
+        <div class="panel-title"><i class="fa-solid fa-earth-americas"></i> Геопространственный мониторинг (AOI)</div>
+        <div class="map-layer-controls">
+          <button id="fetchOsmBtn" class="layer-btn" style="background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.5); color: #6ee7b7;">
+            <i class="fa-solid fa-satellite"></i> Найти поля (OSM)
+          </button>
+          <button id="clearOsmBtn" class="layer-btn hidden" style="background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;" title="Убрать найденные поля OSM с карты">
+            <i class="fa-solid fa-eye-slash"></i> Убрать OSM
+          </button>
+          <button id="layerSatBtn" class="layer-btn active">Спутник (Esri)</button>
+          <button id="layerOsmBtn" class="layer-btn">Схема (OSM)</button>
+        </div>
+      </div>
+
+      <!-- Floating Draw Control Bar -->
+      <div id="drawToolbar" class="draw-floating-toolbar hidden">
+        <div class="draw-toolbar-left">
+          <span class="draw-badge points"><i class="fa-solid fa-draw-polygon"></i> Точек: <strong id="drawPointsCount">0</strong></span>
+          <span class="draw-badge area" id="drawAreaBadge">Площадь: <strong id="drawAreaCount">0.0 га</strong></span>
+          <span class="draw-badge limit" title="Ограничение размера поля для качественного агрономического мониторинга">макс. 10 000 га</span>
+        </div>
+        <div class="draw-toolbar-actions">
+          <button id="finishDrawBtn" class="btn btn-finish-draw" disabled>
+            <i class="fa-solid fa-check"></i> Завершить <span class="hotkey-hint">Enter</span>
+          </button>
+          <button id="undoDrawBtn" class="btn btn-undo-draw" title="Отменить последнюю точку (Backspace)" disabled>
+            <i class="fa-solid fa-rotate-left"></i> Шаг назад
+          </button>
+          <button id="cancelDrawBtn" class="btn btn-cancel-draw" title="Отменить рисование (Esc)">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
+      <div id="map" class="map-container"></div>
+      <div class="map-footer">
+        <div class="map-legend">
+          <span class="legend-item"><span class="color-box selected-field"></span> Выбранное поле</span>
+          <span class="legend-item"><span class="color-box other-field"></span> Поля OSM</span>
+          <span class="legend-item"><span class="color-box drawn-field"></span> Пользовательский контур</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Column: Analytics & Charts -->
+    <section class="analytics-column">
+      <!-- Loading Overlay -->
+      <div id="analyticsLoader" class="analytics-loading-overlay hidden">
+        <div class="loader-card">
+          <div class="satellite-orbit-loader">
+            <div class="orbit-ring"></div>
+            <i class="fa-solid fa-satellite pulse-icon"></i>
+          </div>
+          <div id="loaderTitle" class="loader-title">Загрузка и обработка ДЗЗ</div>
+          <div id="loaderStepText" class="loader-step">Запрос к Google Earth Engine (Sentinel-2)...</div>
+          <div class="loader-progress-bar">
+            <div class="loader-progress-fill"></div>
+          </div>
+          <div class="loader-sub">Осреднение пикселей, метеорология ERA5 и ML-интерполяция</div>
+        </div>
+      </div>
+
+      <!-- Data Source Attribution Panel -->
+      <div id="dataSourceCard" class="panel data-source-panel">
+        <div class="panel-header ds-header">
+          <div class="panel-title ds-title">
+            <i class="fa-solid fa-satellite-dish"></i> Источники данных и алгоритмы
+          </div>
+          <span id="activeFieldBadge" class="active-field-badge">Ожидание выбора поля</span>
+        </div>
+        <div class="data-source-grid">
+          <div class="ds-item">
+            <div class="ds-label"><i class="fa-solid fa-satellite"></i> Спутниковые ДЗЗ:</div>
+            <div id="dsSatellite" class="ds-val">Google Earth Engine (Sentinel-2 L2A, 10м)</div>
+          </div>
+          <div class="ds-item">
+            <div class="ds-label"><i class="fa-solid fa-cloud-sun-rain"></i> Метеорология:</div>
+            <div id="dsWeather" class="ds-val">ECMWF ERA5 Reanalysis (суточные архивы)</div>
+          </div>
+          <div class="ds-item">
+            <div class="ds-label"><i class="fa-solid fa-microchip"></i> ML-реконструкция:</div>
+            <div id="dsModel" class="ds-val">Ансамбль LightGBM + CatBoost (GapScore 8.52)</div>
+          </div>
+          <div class="ds-item">
+            <div class="ds-label"><i class="fa-solid fa-seedling"></i> Климатическая норма:</div>
+            <div id="dsClim" class="ds-val">Многолетняя климатология DOY (2014–актуальный сезон)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NDVI Timeseries Chart Panel -->
+      <div class="panel chart-panel">
+        <div class="panel-header chart-panel-header">
+          <div class="panel-title-group">
+            <div class="panel-title">
+              <i class="fa-solid fa-chart-line"></i> Динамика вегетации (NDVI) & Реконструкция рядов
+            </div>
+            <span id="chartDaysBadge" class="chart-days-badge" title="Длительность анализируемого периода вегетации">
+              <i class="fa-regular fa-calendar-days"></i> <span id="chartDaysText">— дн.</span>
+            </span>
+          </div>
+          <div class="chart-header-controls">
+            <div class="chart-badges">
+              <span class="sensor-badge s2"><i class="fa-solid fa-circle"></i> Sentinel-2 (10m)</span>
+              <span class="sensor-badge ls"><i class="fa-solid fa-circle"></i> Landsat (30m)</span>
+              <span class="sensor-badge mod"><i class="fa-solid fa-circle"></i> MODIS (250m)</span>
+              <span class="sensor-badge rec"><i class="fa-solid fa-minus"></i> Реконструкция ML</span>
+              <span class="sensor-badge clim"><i class="fa-solid fa-square"></i> Норма (±1σ)</span>
+            </div>
+            <div class="chart-zoom-toolbar">
+              <button id="chartZoomInBtn" class="chart-tool-btn" title="Приблизить масштаб (или колесико мыши)">
+                <i class="fa-solid fa-magnifying-glass-plus"></i>
+              </button>
+              <button id="chartZoomOutBtn" class="chart-tool-btn" title="Отдалить масштаб">
+                <i class="fa-solid fa-magnifying-glass-minus"></i>
+              </button>
+              <button id="chartResetZoomBtn" class="chart-tool-btn reset-btn" title="Сбросить масштаб ко всему периоду">
+                <i class="fa-solid fa-arrows-rotate"></i> <span>Сброс</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="chart-wrapper">
+          <canvas id="ndviChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Weather Reanalysis Chart Panel -->
+      <div class="panel chart-panel weather-panel">
+        <div class="panel-header chart-panel-header">
+          <div class="panel-title-group">
+            <div class="panel-title">
+              <i class="fa-solid fa-cloud-sun-rain"></i> Метеорологический контекст (ERA5 Reanalysis)
+            </div>
+          </div>
+          <div class="chart-header-controls">
+            <div class="chart-badges">
+              <span class="weather-badge temp"><i class="fa-solid fa-temperature-three-quarters"></i> Температура (°C)</span>
+              <span class="weather-badge precip"><i class="fa-solid fa-droplet"></i> Осадки (мм)</span>
+            </div>
+          </div>
+        </div>
+        <div class="chart-wrapper-weather">
+          <canvas id="weatherChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Anomalies & Agronomic Diagnostics Panel -->
+      <div class="panel anomalies-panel">
+        <div class="panel-header anomalies-panel-header">
+          <div class="panel-title">
+            <i class="fa-solid fa-stethoscope"></i> Журнал выявленных аномалий и экспертная агрономическая диагностика
+          </div>
+          <button id="openPassportBtn" class="btn btn-export-passport" title="Сформировать официальный агрономический паспорт поля (PDF / Печать / GeoJSON)" disabled>
+            <i class="fa-solid fa-file-invoice"></i> Агропаспорт поля
+          </button>
+        </div>
+        <div id="anomaliesList" class="anomalies-list">
+          <div class="empty-state">
+            <i class="fa-solid fa-draw-polygon" style="color: #00f0ff; font-size: 20px; margin-bottom: 6px;"></i><br>
+            Выберите поле в списке выше, нарисуйте контур на карте или найдите поля через OSM для автоматического анализа.
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal for Batch Inference (submission.csv) -->
+  <div id="batchModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa-solid fa-bolt"></i> Batch-инференс & Submission (Задача 1)</div>
+        <button id="closeModalBtn" class="btn-icon"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-description">
+          Автоматическое восстановление скрытых контрольных пропусков <code>is_synthetic_gap = True</code> на основе ансамбля <strong>LightGBM + CatBoost</strong> с учетом трансдуктивной климатологии, bi-directional лагов и метеоданных ERA5.
+        </p>
+
+        <div class="batch-status-box">
+          <div class="status-row">
+            <span>Статус готовности сабмита:</span>
+            <strong id="batchStatusText" class="text-green">Готов</strong>
+          </div>
+          <div class="status-row">
+            <span>Количество предсказанных строк:</span>
+            <strong id="batchRowCount">3 112 строк</strong>
+          </div>
+          <div class="status-row">
+            <span>Уникальных полигонов (AOI):</span>
+            <strong id="batchPolyCount">78 полигонов</strong>
+          </div>
+          <div class="status-row">
+            <span>Средний предсказанный NDVI:</span>
+            <strong id="batchMeanNdvi">--</strong>
+          </div>
+          <div class="status-row">
+            <span>Формат файла:</span>
+            <code>anon_polygon_id,date,primary_ndvi_pred</code>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <a id="downloadSubBtn" href="/api/download-submission" class="btn btn-primary btn-large">
+            <i class="fa-solid fa-download"></i> Скачать submission.csv
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Custom Field Naming & Color Styling -->
+  <div id="fieldModal" class="modal-backdrop hidden">
+    <div class="modal-card" style="width: 450px;">
+      <div class="modal-header">
+        <div class="modal-title" id="fieldModalTitle"><i class="fa-solid fa-palette"></i> Настройка поля</div>
+        <button id="closeFieldModalBtn" class="btn-icon"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group-modal">
+          <label class="modal-label"><i class="fa-solid fa-pen"></i> Название поля:</label>
+          <input type="text" id="fieldNameInput" class="modal-input" placeholder="Введите название (например, Северное поле)">
+        </div>
+
+        <div class="form-group-modal">
+          <label class="modal-label"><i class="fa-solid fa-droplet"></i> Цвет контура на карте:</label>
+          <div class="color-palette-group" id="colorPaletteGroup">
+            <button type="button" class="color-swatch-btn active" data-color="#00f0ff" style="background-color: #00f0ff;" title="Неоновый циан"></button>
+            <button type="button" class="color-swatch-btn" data-color="#10b981" style="background-color: #10b981;" title="Изумрудный"></button>
+            <button type="button" class="color-swatch-btn" data-color="#f59e0b" style="background-color: #f59e0b;" title="Янтарный"></button>
+            <button type="button" class="color-swatch-btn" data-color="#a855f7" style="background-color: #a855f7;" title="Фиолетовый"></button>
+            <button type="button" class="color-swatch-btn" data-color="#f43f5e" style="background-color: #f43f5e;" title="Коралловый"></button>
+            <button type="button" class="color-swatch-btn" data-color="#3b82f6" style="background-color: #3b82f6;" title="Синий"></button>
+            <button type="button" class="color-swatch-btn" data-color="#84cc16" style="background-color: #84cc16;" title="Лаймовый"></button>
+            <button type="button" class="color-swatch-btn" data-color="#ec4899" style="background-color: #ec4899;" title="Розовый"></button>
+            <div class="native-color-wrap" title="Выбрать свой произвольный цвет">
+              <input type="color" id="nativeColorPicker" value="#00f0ff" class="native-color-picker">
+              <i class="fa-solid fa-eye-dropper"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="field-info-preview">
+          <div class="info-preview-row">
+            <span>Площадь:</span>
+            <strong id="modalFieldArea">-- га</strong>
+          </div>
+          <div class="info-preview-row">
+            <span>Центроид (WGS-84):</span>
+            <strong id="modalFieldCoords">--</strong>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 8px; justify-content: flex-end; gap: 10px;">
+          <button id="cancelFieldModalBtn" class="btn btn-secondary">Отмена</button>
+          <button id="saveFieldModalBtn" class="btn btn-primary"><i class="fa-solid fa-check"></i> Сохранить поле</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Field Passport & Executive Agronomic Report -->
+  <div id="passportModal" class="modal-backdrop hidden">
+    <div class="modal-card passport-modal-card">
+      <div class="modal-header passport-modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-file-contract text-cyan"></i>
+          <span>Агрономический паспорт поля // Официальное заключение ДЗЗ</span>
+        </div>
+        <div class="passport-header-actions">
+          <button id="printPassportBtn" class="btn btn-primary btn-sm" title="Открыть окно печати браузера для сохранения в PDF">
+            <i class="fa-solid fa-print"></i> Печать в PDF
+          </button>
+          <button id="exportGeoJsonBtn" class="btn btn-secondary btn-sm" title="Выгрузить контур и метаданные в формате GeoJSON для QGIS / Cropwise">
+            <i class="fa-solid fa-file-code"></i> GeoJSON
+          </button>
+          <button id="exportCsvBtn" class="btn btn-secondary btn-sm" title="Скачать суточный временной ряд NDVI и погоды в CSV">
+            <i class="fa-solid fa-file-csv"></i> CSV
+          </button>
+          <button id="closePassportModalBtn" class="btn-icon" title="Закрыть окно паспорта"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </div>
+
+      <div class="modal-body passport-modal-body">
+        <!-- Printable Document Canvas -->
+        <div id="passportPrintDoc" class="passport-document">
+          <!-- Document Header -->
+          <div class="doc-official-header">
+            <div class="doc-header-brand">
+              <div class="doc-logo-box">
+                <i class="fa-solid fa-satellite-dish"></i>
+              </div>
+              <div class="doc-brand-info">
+                <div class="doc-org-title">GEO-VEGA // АГРОКОСМИЧЕСКИЙ МОНИТОРИНГ</div>
+                <div class="doc-doc-title">ЭКСПЕРТНЫЙ АГРОНОМИЧЕСКИЙ ПАСПОРТ С/Х УГОДИЙ</div>
+                <div class="doc-doc-sub">Комплексный анализ вегетационной динамики, реконструкция рядов ДЗЗ и аудит фитосанитарного состояния</div>
+              </div>
+            </div>
+            <div class="doc-header-meta">
+              <div class="doc-meta-item"><span>Рег. номер:</span> <strong id="docRegNumber">PASSPORT-2026-001</strong></div>
+              <div class="doc-meta-item"><span>Дата выпуска:</span> <strong id="docGeneratedAt">--</strong></div>
+              <div class="doc-meta-item"><span>Статус ДЗЗ:</span> <span class="doc-status-pill ok">GEE ВЕРИФИЦИРОВАНО</span></div>
+            </div>
+          </div>
+
+          <!-- Section 1: Field Passport Metadata Grid -->
+          <div class="doc-section">
+            <div class="doc-section-title"><i class="fa-solid fa-map-location-dot"></i> 1. Учетные параметры земельного участка (AOI)</div>
+            <div class="doc-meta-grid">
+              <div class="doc-grid-cell">
+                <span class="cell-label">Наименование участка / ID:</span>
+                <strong class="cell-value" id="docFieldName">--</strong>
+              </div>
+              <div class="doc-grid-cell">
+                <span class="cell-label">Возделываемая культура:</span>
+                <strong class="cell-value highlight" id="docCropType">--</strong>
+              </div>
+              <div class="doc-grid-cell">
+                <span class="cell-label">Площадь контура:</span>
+                <strong class="cell-value" id="docArea">-- га</strong>
+              </div>
+              <div class="doc-grid-cell">
+                <span class="cell-label">Географический центроид (WGS-84):</span>
+                <strong class="cell-value" id="docCentroid">--</strong>
+              </div>
+              <div class="doc-grid-cell">
+                <span class="cell-label">Анализируемый период:</span>
+                <strong class="cell-value" id="docPeriod">--</strong>
+              </div>
+              <div class="doc-grid-cell">
+                <span class="cell-label">Фактическое состояние биомассы:</span>
+                <strong class="cell-value" id="docStatus">--</strong>
+              </div>
+              <div class="doc-grid-cell">
+                <span class="cell-label">Текущий индекс NDVI / Z-Score:</span>
+                <strong class="cell-value" id="docNdviZ">--</strong>
+              </div>
+              <div class="doc-grid-cell">
+                <span class="cell-label">Реконструировано пропусков:</span>
+                <strong class="cell-value" id="docGapsCount">-- точек (LightGBM + CatBoost)</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: Vegetation Timeseries Graphic -->
+          <div class="doc-section">
+            <div class="doc-section-title"><i class="fa-solid fa-chart-line"></i> 2. Профиль вегетационной динамики (NDVI) и климатический коридор нормы</div>
+            <div class="doc-chart-container">
+              <img id="docChartImage" class="doc-chart-img" alt="График хода вегетации NDVI" />
+              <div class="doc-chart-legend-print">
+                <span>● Sentinel-2 (10м)</span>
+                <span>▲ Landsat 8/9 (30м)</span>
+                <span>◆ MODIS (250м)</span>
+                <span>— Восстановленный primary_ndvi (ML)</span>
+                <span>--- Климатическая норма (±1σ)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: Anomaly Register Table -->
+          <div class="doc-section">
+            <div class="doc-section-title"><i class="fa-solid fa-triangle-exclamation"></i> 3. Реестр выявленных агроэкологических аномалий и угнетений</div>
+            <div id="docAnomaliesContainer">
+              <!-- Dynamically rendered table -->
+            </div>
+          </div>
+
+          <!-- Section 4: Actionable Directives & Agronomic Recommendations -->
+          <div class="doc-section">
+            <div class="doc-section-title"><i class="fa-solid fa-clipboard-check"></i> 4. Директивный план агротехнических мероприятий (Предписания агроному)</div>
+            <div id="docDirectivesContainer" class="doc-directives-list">
+              <!-- Dynamically populated recommendations -->
+            </div>
+          </div>
+
+          <!-- Section 5: Signature & Official Verification Seal -->
+          <div class="doc-section doc-signature-section">
+            <div class="doc-seal-box">
+              <div class="seal-circle">
+                <i class="fa-solid fa-certificate"></i>
+                <span>GEO-VEGA<br>VERIFIED<br>2026</span>
+              </div>
+              <div class="seal-text">
+                Документ сформирован программным комплексом GEO-VEGA в рамках Всероссийского Космохакатона.<br>
+                Опора данных: мультисенсорный каскад Google Earth Engine & ECMWF ERA5 Reanalysis.
+              </div>
+            </div>
+            <div class="doc-signatures">
+              <div class="sign-line">
+                <span class="sign-role">Главный агроном хозяйства:</span>
+                <span class="sign-space">_______________________ / ________________ /</span>
+              </div>
+              <div class="sign-line">
+                <span class="sign-role">Дата визирования:</span>
+                <span class="sign-space" id="docSignDate">«____» _______________ 2026 г.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet JS & Leaflet Draw -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  
+  <!-- Main Application Script -->
+  <script src="app.js"></script>
+</body>
+</html>

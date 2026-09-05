@@ -1,0 +1,149 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "AOI-0001",
+      "properties": {
+        "anon_polygon_id": "AOI-0001",
+        "name": "Поле №104 (Кинельский район)",
+        "region": "Самарская область",
+        "crop_type": "озимая пшеница",
+        "area_ha": 142.5,
+        "soil_type": "Чернозем обыкновенный",
+        "reference_years": 15,
+        "status": "verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[50.485, 53.220], [50.510, 53.220], [50.505, 53.205], [50.480, 53.205], [50.485, 53.220]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AOI-0002",
+      "properties": {
+        "anon_polygon_id": "AOI-0002",
+        "name": "Поле №218 (Красноярский район)",
+        "region": "Самарская область",
+        "crop_type": "озимая пшеница",
+        "area_ha": 188.0,
+        "soil_type": "Чернозем выщелоченный",
+        "reference_years": 15,
+        "status": "verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[50.310, 53.480], [50.340, 53.480], [50.335, 53.460], [50.305, 53.460], [50.310, 53.480]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AOI-0003",
+      "properties": {
+        "anon_polygon_id": "AOI-0003",
+        "name": "Поле №312 (Волжский район)",
+        "region": "Самарская область",
+        "crop_type": "подсолнечник",
+        "area_ha": 210.4,
+        "soil_type": "Чернозем типичный",
+        "reference_years": 15,
+        "status": "verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[50.150, 53.110], [50.185, 53.112], [50.180, 53.090], [50.145, 53.088], [50.150, 53.110]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AOI-0004",
+      "properties": {
+        "anon_polygon_id": "AOI-0004",
+        "name": "Поле №405 (Ставропольский район)",
+        "region": "Самарская область",
+        "crop_type": "зерновые",
+        "area_ha": 165.2,
+        "soil_type": "Темно-каштановая",
+        "reference_years": 14,
+        "status": "verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[49.520, 53.620], [49.550, 53.622], [49.545, 53.600], [49.515, 53.598], [49.520, 53.620]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AOI-0005",
+      "properties": {
+        "anon_polygon_id": "AOI-0005",
+        "name": "Поле №517 (Безенчукский район)",
+        "region": "Самарская область",
+        "crop_type": "пастбища/зерновые",
+        "area_ha": 195.8,
+        "soil_type": "Чернозем южный",
+        "reference_years": 15,
+        "status": "verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[49.780, 52.950], [49.815, 52.952], [49.810, 52.930], [49.775, 52.928], [49.780, 52.950]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AOI-0006",
+      "properties": {
+        "anon_polygon_id": "AOI-0006",
+        "name": "Поле №603 (Кошкинский район)",
+        "region": "Самарская область",
+        "crop_type": "зерновые",
+        "area_ha": 178.6,
+        "soil_type": "Чернозем типичный",
+        "reference_years": 14,
+        "status": "verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[50.450, 54.120], [50.485, 54.122], [50.480, 54.100], [50.445, 54.098], [50.450, 54.120]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AOI-0007",
+      "properties": {
+        "anon_polygon_id": "AOI-0007",
+        "name": "Поле №712 (Приволжский район)",
+        "region": "Самарская область",
+        "crop_type": "подсолнечник",
+        "area_ha": 230.1,
+        "soil_type": "Чернозем южный",
+        "reference_years": 15,
+        "status": "verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[48.650, 52.880], [48.690, 52.882], [48.685, 52.860], [48.645, 52.858], [48.650, 52.880]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AOI-0008",
+      "properties": {
+        "anon_polygon_id": "AOI-0008",
+        "name": "Поле №820 (Сызранский район)",
+        "region": "Самарская область",
+        "crop_type": "озимая пшеница",
+        "area_ha": 154.3,
+        "soil_type": "Серые лесные",
+        "reference_years": 15,
+        "status": "verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[48.420, 53.210], [48.455, 53.212], [48.450, 53.190], [48.415, 53.188], [48.420, 53.210]]]
+      }
+    }
+  ]
+}
