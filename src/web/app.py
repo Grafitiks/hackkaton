@@ -680,10 +680,10 @@ def get_polygon_timeseries(
     }
     
     data_sources = {
-        'satellite': 'Мультисенсорный спутниковый архив: Sentinel-2 (10м) + Landsat-8/9 (30м) + MODIS (250м)',
-        'weather': 'ECMWF ERA5 Reanalysis (суточные температуры и осадки)',
-        'model': 'Ансамбль 5-Fold LightGBM + CatBoost (GapScore: 8.52)',
-        'climatology': f'Многолетняя климатология DOY 2014–{get_current_year()} ({kpis["crop_type"]})'
+        'satellite': 'Google Earth Engine & STAC (Sentinel-2 L2A 10м, Landsat 8/9 30м, MODIS 250м) + OSM Overpass',
+        'weather': 'ECMWF ERA5 & ERA5-Land Reanalysis (суточные температуры, осадки, ГТК Селянинова)',
+        'model': 'Ансамбль 5-Fold LightGBM + CatBoost (43 признака, калибровка сенсоров, GapScore 8.52)',
+        'climatology': f'Многолетняя климатология DOY 2014–{get_current_year()} ({kpis["crop_type"]}, норма ±1σ)'
     }
     
     return {
@@ -801,10 +801,10 @@ def analyze_custom_polygon(req: CustomPolygonRequest):
     
     from src.data_fetchers.gee_fetcher import is_gee_available
     data_sources = {
-        'satellite': 'Google Earth Engine (Sentinel-2 10м, Landsat 8/9, MODIS 250м)' if is_gee_available() else 'Earth Search STAC (Sentinel-2 L2A)',
-        'weather': 'ECMWF ERA5 / ERA5-Land Reanalysis (Open-Meteo Global)',
-        'model': 'Ансамбль 5-Fold LightGBM + CatBoost (GapScore 8.52)',
-        'climatology': 'Динамическая многолетняя норма GEE' if is_gee_available() else f'Геоадаптивная норма ({crop})'
+        'satellite': 'Google Earth Engine (Sentinel-2 10м, Landsat 8/9 30м, MODIS 250м) + OSM Overpass' if is_gee_available() else 'Earth Search STAC (Sentinel-2 L2A 10м, Landsat, MODIS) + OSM Overpass',
+        'weather': 'ECMWF ERA5 & ERA5-Land Reanalysis (Open-Meteo Global, ГТК Селянинова)',
+        'model': 'Ансамбль 5-Fold LightGBM + CatBoost (43 признака, калибровка сенсоров, GapScore 8.52)',
+        'climatology': 'Динамическая многолетняя норма DOY (GEE, ±1σ)' if is_gee_available() else f'Многолетняя климатология DOY ({crop}, коридор ±1σ)'
     }
     
     return {
@@ -904,9 +904,9 @@ def export_field_geojson(req: ExportFieldGeoJsonRequest):
             "anomalies_registry": req.anomalies,
             "directives_plan": directives_list,
             "verification_sources": [
-                "Google Earth Engine (Sentinel-2 L2A 10m, Landsat 8/9 30m, MODIS 250m)",
-                "ECMWF ERA5-Land Reanalysis (суточная метеорология)",
-                "Ансамбль LightGBM + CatBoost (восстановление облачных пропусков)"
+                "Google Earth Engine & STAC (Sentinel-2 L2A 10м, Landsat 8/9 30м, MODIS 250м) + OSM Overpass",
+                "ECMWF ERA5 & ERA5-Land Reanalysis (суточные температуры, осадки, ГТК Селянинова)",
+                "Ансамбль 5-Fold LightGBM + CatBoost (43 признака, восстановление пропусков NDVI, GapScore 8.52)"
             ]
         }
     }

@@ -167,7 +167,7 @@
         <div id="gapsCount" class="kpi-value highlight-purple">--</div>
         <span class="kpi-unit">точек</span>
       </div>
-      <div class="kpi-sub">Ансамбль LightGBM + CatBoost</div>
+      <div class="kpi-sub">5-Fold LightGBM + CatBoost (43 признака)</div>
     </div>
   </section>
 
@@ -244,15 +244,15 @@
             <i class="fa-solid fa-satellite pulse-icon"></i>
           </div>
           <div id="loaderTitle" class="loader-title">Загрузка и обработка ДЗЗ</div>
-          <div id="loaderStepText" class="loader-step">Запрос к Google Earth Engine (Sentinel-2)...</div>
+          <div id="loaderStepText" class="loader-step">Запрос к Google Earth Engine & STAC (Sentinel-2, 10м)...</div>
           <div class="loader-progress-bar">
             <div class="loader-progress-fill"></div>
           </div>
-          <div class="loader-sub">Осреднение пикселей, метеорология ERA5 и ML-интерполяция</div>
+          <div class="loader-sub">Осреднение пикселей, агрометеорология ERA5 и ансамбль 5-Fold LightGBM + CatBoost</div>
         </div>
       </div>
 
-      <!-- Панель статуса и источников данных (Sentinel-2, Landsat, MODIS, ERA5) -->
+      <!-- Панель статуса и источников данных (Sentinel-2, Landsat, MODIS, ERA5, 5-Fold ML) -->
       <div id="dataSourceCard" class="panel data-source-panel">
         <div class="panel-header ds-header">
           <div class="panel-title ds-title">
@@ -263,19 +263,19 @@
         <div class="data-source-grid">
           <div class="ds-item">
             <div class="ds-label"><i class="fa-solid fa-satellite"></i> Спутниковые ДЗЗ:</div>
-            <div id="dsSatellite" class="ds-val">Google Earth Engine (Sentinel-2 L2A, 10м)</div>
+            <div id="dsSatellite" class="ds-val">Google Earth Engine & STAC (Sentinel-2 L2A 10м, Landsat 8/9 30м, MODIS 250м) + OSM Overpass</div>
           </div>
           <div class="ds-item">
             <div class="ds-label"><i class="fa-solid fa-cloud-sun-rain"></i> Метеорология:</div>
-            <div id="dsWeather" class="ds-val">ECMWF ERA5 Reanalysis (суточные архивы)</div>
+            <div id="dsWeather" class="ds-val">ECMWF ERA5 & ERA5-Land Reanalysis (суточные температуры, осадки, ГТК Селянинова)</div>
           </div>
           <div class="ds-item">
             <div class="ds-label"><i class="fa-solid fa-microchip"></i> ML-реконструкция:</div>
-            <div id="dsModel" class="ds-val">Ансамбль LightGBM + CatBoost (GapScore 8.52)</div>
+            <div id="dsModel" class="ds-val">Ансамбль 5-Fold LightGBM + CatBoost (43 признака, калибровка сенсоров, GapScore 8.52)</div>
           </div>
           <div class="ds-item">
             <div class="ds-label"><i class="fa-solid fa-seedling"></i> Климатическая норма:</div>
-            <div id="dsClim" class="ds-val">Многолетняя климатология DOY (2014–актуальный сезон)</div>
+            <div id="dsClim" class="ds-val">Многолетняя климатология DOY 2014–2026 (коридор нормы ±1σ, Z-Score детекция)</div>
           </div>
         </div>
       </div>
@@ -489,7 +489,7 @@
               </div>
               <div class="doc-grid-cell">
                 <span class="cell-label">Реконструировано пропусков:</span>
-                <strong class="cell-value" id="docGapsCount">-- точек (LightGBM + CatBoost)</strong>
+                <strong class="cell-value" id="docGapsCount">-- точек (Ансамбль 5-Fold LightGBM + CatBoost, 43 признака)</strong>
               </div>
             </div>
           </div>
@@ -503,7 +503,7 @@
                 <span>● Sentinel-2 (10м)</span>
                 <span>▲ Landsat 8/9 (30м)</span>
                 <span>◆ MODIS (250м)</span>
-                <span>— Восстановленный primary_ndvi (ML)</span>
+                <span>— Реконструкция primary_ndvi (5-Fold LightGBM + CatBoost)</span>
                 <span>--- Климатическая норма (±1σ)</span>
               </div>
             </div>
@@ -534,7 +534,7 @@
               </div>
               <div class="seal-text">
                 Документ сформирован программным комплексом GEO-VEGA в рамках Всероссийского Космохакатона.<br>
-                Опора данных: мультисенсорный каскад Google Earth Engine & ECMWF ERA5 Reanalysis.
+                Опора данных: мультисенсорный каскад Sentinel-2 L2A, Landsat 8/9, MODIS, ECMWF ERA5 & ансамбль 5-Fold LightGBM + CatBoost (GapScore 8.52).
               </div>
             </div>
             <div class="doc-signatures">
@@ -591,7 +591,7 @@
           <div class="region-kpi-card">
             <div class="region-kpi-title">Сумма осадков</div>
             <div id="regPrecip" class="region-kpi-value highlight-cyan">-- мм</div>
-            <div class="region-kpi-sub">ECMWF ERA5 Reanalysis</div>
+            <div class="region-kpi-sub">ECMWF ERA5 & ERA5-Land</div>
           </div>
           <div class="region-kpi-card">
             <div class="region-kpi-title">ГТК Селянинова</div>
@@ -746,6 +746,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
   
   <!-- Основной клиентский сценарий веб-интерфейса -->
-  <script src="app.js?v=20260905_drawprimary"></script>
+  <script src="app.js?v=20260905_actualsources"></script>
 </body>
 </html>

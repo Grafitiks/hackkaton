@@ -2651,13 +2651,13 @@ function showAnalyticsLoading(title = "Анализ данных поля", isGE
 
   const steps = isGEE ? [
     "🛰️ Запрос к Google Earth Engine (Sentinel-2 L2A Harmonized, 10м)...",
-    "☁️ Фильтрация облачности (SCL) и расчет зонального среднего NDVI...",
-    "🌡️ Запрос суточного метеоархива ECMWF ERA5 (температура и осадки)...",
-    "⚡ ML-реконструкция временного ряда и расчет Z-Score отклонений..."
+    "☁️ Фильтрация облачности (SCL/QA60) и расчет зонального среднего NDVI...",
+    "🌡️ Запрос суточного метеоархива ECMWF ERA5 (температура, осадки, ГТК)...",
+    "⚡ Ансамбль 5-Fold LightGBM + CatBoost (43 фактора) и Z-Score детекция..."
   ] : [
-    "📊 Загрузка мультисенсорного ряда ДЗЗ (Sentinel-2, Landsat, MODIS)...",
-    "🌡️ Синхронизация метеоданных ERA5...",
-    "⚡ Расчет ансамбля LightGBM + CatBoost и Z-Score нормы..."
+    "📊 Загрузка мультисенсорного ряда ДЗЗ (Sentinel-2 10м, Landsat 8/9 30м, MODIS 250м)...",
+    "🌡️ Синхронизация агрометеорологии ERA5 (температура, осадки, ГТК)...",
+    "⚡ Ансамбль 5-Fold LightGBM + CatBoost (43 фактора) и Z-Score детекция..."
   ];
 
   let stepIdx = 0;
@@ -3554,7 +3554,7 @@ function openPassportModal() {
     const zVal = Number(kpis.current_zscore || 0).toFixed(2);
     ndviZEl.textContent = `NDVI = ${ndviVal} (Z-Score: ${zVal > 0 ? '+' : ''}${zVal} σ)`;
   }
-  if (gapsEl) gapsEl.textContent = `${kpis.total_gaps_filled || 0} точек (Ансамбль LightGBM + CatBoost)`;
+  if (gapsEl) gapsEl.textContent = `${kpis.total_gaps_filled || 0} точек (Ансамбль 5-Fold LightGBM + CatBoost, 43 признака)`;
   if (signDateEl) signDateEl.textContent = `«${now.getDate()}» ${monthsRu[now.getMonth()]} ${now.getFullYear()} г.`;
 
   // Снимок графика динамики вегетации для вставки в печатную форму
