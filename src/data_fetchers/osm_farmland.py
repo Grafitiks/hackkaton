@@ -39,9 +39,9 @@ out geom {limit};"""
                     geom = el.get('geometry', [])
                     if len(geom) < 3:
                         continue
-                    # Convert to GeoJSON [[lon, lat], ...]
+                    # Преобразование координат в формат GeoJSON [[lon, lat], ...]
                     coords = [[pt['lon'], pt['lat']] for pt in geom]
-                    # Close ring if not closed
+                    # Замыкание контура полигона при необходимости
                     if coords[0] != coords[-1]:
                         coords.append(coords[0])
                         

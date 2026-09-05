@@ -12,7 +12,8 @@ LABEL description="Веб-сервис мониторинга вегетацио
 # Отключение буферизации вывода для мгновенного отображения логов в консоли
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PRODUCTION=1
 
 # Установка системных зависимостей:
 # - libgomp1: необходим для многопоточного OpenMP инференса ансамбля LightGBM/CatBoost
@@ -30,11 +31,12 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
-# Копирование исходного кода, весов моделей и данных
+# Копирование исходного кода, весов моделей, данных и сабмита
 COPY src/ ./src/
 COPY data/ ./data/
 COPY artifacts/ ./artifacts/
-COPY run_server.py predict_submission.py ./
+COPY run_server.py predict_submission.py setup_gee.py ./
+COPY submission*.csv ./
 
 # Экспорт сетевого порта веб-интерфейса и REST API
 EXPOSE 8000
@@ -43,5 +45,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/api/batch-status || exit 1
 
-# Запуск веб-сервиса GEO-VEGA
-CMD ["python", "run_server.py", "--host", "0.0.0.0", "--port", "8000"]
+# Запуск веб-сервиса GEO-VEGA в продакшен-режиме (без фонового опросчика файлов reload)
+CMD ["python", "run_server.py", "--host", "0.0.0.0", "--port", "8000", "--no-reload"]

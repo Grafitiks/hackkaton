@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional, Tuple
 
-# Ensure project modules are importable
+# Обеспечение корректного импорта модулей проекта
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(BASE_DIR)
 
@@ -38,7 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global cache for data
+# Глобальный кэш данных приложения
 CACHE = {
     'train_df': None,
     'test_df': None,
@@ -51,13 +51,13 @@ CACHE = {
 @app.on_event("startup")
 def load_data():
     print("Инициализация данных веб-сервиса...")
-    # Load polygons geojson
+    # Загрузка геометрий полигонов из GeoJSON
     geo_path = os.path.join(os.path.dirname(__file__), "polygons_geo.json")
     if os.path.exists(geo_path):
         with open(geo_path, "r", encoding="utf-8") as f:
             CACHE['polygons_geo'] = json.load(f)
             
-    # Load datasets
+    # Загрузка датасетов
     train_path = os.path.join(BASE_DIR, "data/train_dataset.csv")
     if os.path.exists(train_path):
         print("Загрузка train_dataset.csv в кэш...")
@@ -66,15 +66,23 @@ def load_data():
         df_tr['year'] = df_tr['date_dt'].dt.year
         CACHE['train_df'] = df_tr
         
-    test_path = os.path.join(BASE_DIR, "data/private_features.csv")
-    if os.path.exists(test_path):
-        print("Загрузка private_features.csv в кэш...")
-        df_te = pd.read_csv(test_path, encoding='utf-8')
-        df_te['date_dt'] = pd.to_datetime(df_te['date'])
-        df_te['year'] = df_te['date_dt'].dt.year
-        CACHE['test_df'] = df_te
+    # Поиск тестового датасета
+    test_candidates = [
+        os.path.join(BASE_DIR, "data/test_features (1).csv"),
+        os.path.join(BASE_DIR, "data/test_features.csv"),
+        os.path.join(BASE_DIR, "data/private_features.csv"),
+        os.path.join(BASE_DIR, "test_features (1).csv")
+    ]
+    for tp in test_candidates:
+        if os.path.exists(tp):
+            print(f"Загрузка {os.path.basename(tp)} в кэш...")
+            df_te = pd.read_csv(tp, encoding='utf-8')
+            df_te['date_dt'] = pd.to_datetime(df_te['date'])
+            df_te['year'] = df_te['date_dt'].dt.year
+            CACHE['test_df'] = df_te
+            break
 
-    # Load artifacts if available
+    # Загрузка обученных артефактов и моделей при их наличии
     clim_path = os.path.join(BASE_DIR, "artifacts/models/climatology.pkl")
     if os.path.exists(clim_path):
         with open(clim_path, "rb") as f:
@@ -85,7 +93,7 @@ def load_data():
         with open(models_path, "rb") as f:
             CACHE['models'] = pickle.load(f)
             
-    # Check submission.csv
+    # Проверка и загрузка файла submission.csv
     sub_path = os.path.join(BASE_DIR, "submission.csv")
     if os.path.exists(sub_path):
         CACHE['precomputed_sub'] = pd.read_csv(sub_path, encoding='utf-8')
@@ -396,7 +404,7 @@ def geocode_region(query: str = Query(..., min_length=2)):
                         "name": it.get("display_name", query.strip()),
                         "lat": lat,
                         "lon": lon,
-                        "bbox": [bb[2], bb[0], bb[3], bb[1]]  # [min_lon, min_lat, max_lon, max_lat]
+                        "bbox": [bb[2], bb[0], bb[3], bb[1]]  # Ограничивающий прямоугольник: [мин_долгота, мин_широта, макс_долгота, макс_широта]
                     })
         except Exception as e:
             print(f"[Geocode] Внешний геокодер недоступен: {e}")
@@ -538,7 +546,7 @@ def get_polygon_timeseries(
     """
     start_date, end_date, target_yr = validate_period(start_date, end_date, year)
 
-    # 1. Primary Pillar: Query live GEE & satellite pipeline if polygon geometry is known
+    # 1. Основной сценарий: запрос реальных данных GEE и спутникового пайплайна по геометрии
     poly_feature = None
     if CACHE.get('polygons_geo'):
         for feat in CACHE['polygons_geo'].get('features', []):
@@ -558,7 +566,7 @@ def get_polygon_timeseries(
         res['kpis']['polygon_id'] = polygon_id
         return res
 
-    # 2. Fallback to catalog data if geometry is missing
+    # 2. Резервный сценарий: использование данных каталога, если геометрия отсутствует
     df_tr = CACHE.get('train_df')
     df_te = CACHE.get('test_df')
     sub = CACHE.get('precomputed_sub')
@@ -587,31 +595,32 @@ def get_polygon_timeseries(
             detail=f"Данные за выбранный период {start_date} .. {end_date} для поля {polygon_id} отсутствуют"
         )
             
-    # Attach predictions from submission if available
+    # Подстановка предсказанных значений из submission при наличии
     p_df['primary_ndvi_reconstructed'] = p_df['primary_ndvi']
     p_df['is_gap'] = False
     
     if sub is not None:
         sub_p = sub[sub['anon_polygon_id'] == polygon_id]
         if not sub_p.empty:
-            sub_dict = dict(zip(sub_p['date'], sub_p['primary_ndvi_pred']))
+            ndvi_col = 'primary_ndvi_true' if 'primary_ndvi_true' in sub_p.columns else 'primary_ndvi_pred'
+            sub_dict = dict(zip(sub_p['date'], sub_p[ndvi_col]))
             for idx, row in p_df.iterrows():
                 d_str = str(row['date'])
                 if d_str in sub_dict:
                     p_df.loc[idx, 'primary_ndvi_reconstructed'] = sub_dict[d_str]
                     p_df.loc[idx, 'is_gap'] = True
 
-    # Continuous linear reconstruction for visualization of natural gaps
+    # Непрерывная линейная реконструкция для визуализации естественных пропусков
     p_df['primary_ndvi_reconstructed'] = p_df['primary_ndvi_reconstructed'].interpolate(method='linear', limit_direction='both')
     
-    # Attach climatology
+    # Подключение климатологической нормы
     if clim is not None:
         poly_clim = clim['poly_clim']
         p_clim = poly_clim[poly_clim['anon_polygon_id'] == polygon_id]
         if not p_clim.empty:
             p_df = p_df.merge(p_clim[['doy', 'clim_mean', 'clim_std']], on='doy', how='left')
         else:
-            # Fallback to crop climatology
+            # Резервная привязка к средней климатологии культуры
             crop_clim = clim['crop_clim']
             c_type = p_df['crop_type'].iloc[0] if 'crop_type' in p_df.columns else "зерновые"
             p_crop_clim = crop_clim[crop_clim['crop_type'] == c_type]
@@ -623,19 +632,19 @@ def get_polygon_timeseries(
     p_df['clim_mean'] = p_df['clim_mean'].fillna(0.35)
     p_df['clim_std'] = p_df['clim_std'].fillna(0.06)
     
-    # Calculate Z-score
+    # Расчет Z-оценки отклонения от нормы
     p_df['ndvi_zscore'] = compute_zscores(p_df['primary_ndvi_reconstructed'], p_df['clim_mean'], p_df['clim_std'])
     p_df['status'] = p_df['ndvi_zscore'].apply(classify_status)
     
-    # Fill weather if missing
+    # Заполнение пропусков в погодных данных при необходимости
     p_df['era5_temp_c'] = p_df['era5_temp_c'].interpolate(method='linear', limit_direction='both').fillna(20.0)
     p_df['era5_precip_mm'] = p_df['era5_precip_mm'].fillna(0.0)
     
-    # Detect anomalies and generate agronomic interpretations
+    # Детекция аномалий и генерация агрономических интерпретаций
     anom_intervals = detect_anomaly_intervals(p_df)
     anom_report = generate_full_report(anom_intervals)
     
-    # Format timeseries array
+    # Форматирование результирующего массива временного ряда
     records = []
     for _, r in p_df.iterrows():
         records.append({
@@ -657,7 +666,7 @@ def get_polygon_timeseries(
             'precip_mm': round(float(r['era5_precip_mm']), 1)
         })
         
-    # KPIs
+    # Расчет ключевых агрономических показателей (KPI)
     last_rec = records[-1]
     kpis = {
         'polygon_id': polygon_id,
@@ -708,7 +717,7 @@ def analyze_custom_polygon(req: CustomPolygonRequest):
     crop = req.crop_type or "озимая пшеница"
     start_date, end_date, yr = validate_period(req.start_date, req.end_date, req.year)
     
-    # Extract coordinates from GeoJSON
+    # Извлечение координат из структуры GeoJSON
     coords = []
     if geom.get("type") == "Polygon":
         coords = geom["coordinates"][0]
@@ -719,7 +728,7 @@ def analyze_custom_polygon(req: CustomPolygonRequest):
         
     lat_center, lon_center = get_polygon_centroid(coords)
     
-    # Guardrail against accidental continent-scale selections (>50,000 ha)
+    # Защита от случайного выделения чрезмерно больших территорий (>50 000 га)
     from src.data_fetchers.satellite_api import get_polygon_bbox
     min_lon, min_lat, max_lon, max_lat = get_polygon_bbox(coords)
     if (max_lon - min_lon) > 8.0 or (max_lat - min_lat) > 6.0:
@@ -728,31 +737,31 @@ def analyze_custom_polygon(req: CustomPolygonRequest):
             detail="Выделенная область превышает масштаб единичного агромониторинга. Выделите конкретное поле или агрокластер (до 50 000 га)."
         )
     
-    # 1. Fetch real weather data for these exact coordinates and custom period
+    # 1. Запрос фактических метеоданных для указанных координат и периода
     print(f"[Custom AOI] Запрос реальных метеоданных ERA5 для ({lat_center:.3f}, {lon_center:.3f}), период {start_date} .. {end_date}...")
     weather_df = fetch_real_weather(lat_center, lon_center, year=yr, start_date=start_date, end_date=end_date)
     
-    # 2. Fetch real satellite observation sequence
+    # 2. Запрос реальной серии спутниковых наблюдений (Sentinel-2, Landsat, MODIS)
     print(f"[Custom AOI] Сбор спутниковых наблюдений ДЗЗ (Sentinel-2, Landsat, MODIS)...")
     sat_df = fetch_real_satellite_timeseries(coords, yr, crop, weather_df, start_date=start_date, end_date=end_date)
     
-    # Merge satellite and weather
+    # Объединение спутниковых и метеорологических данных
     df_merged = sat_df.merge(weather_df[['date', 'era5_temp_c', 'era5_precip_mm']], on='date', how='left')
     
-    # Primary NDVI by sensor hierarchy
+    # Формирование первичного NDVI по иерархии сенсоров (S2 -> Landsat -> MODIS)
     df_merged['primary_ndvi_raw'] = df_merged['s2_ndvi'].combine_first(df_merged['landsat_ndvi']).combine_first(df_merged['modis_ndvi'])
     
-    # Reconstruct gaps using continuous linear interpolation followed by gentle rolling smoothing
+    # Реконструкция пропусков непрерывной интерполяцией со скользящим сглаживанием
     raw_interp = df_merged['primary_ndvi_raw'].interpolate(method='linear', limit_direction='both')
     df_merged['primary_ndvi_reconstructed'] = raw_interp.rolling(5, min_periods=1, center=True).mean().round(4)
-    # Fallback to actual profile if sparse
+    # Резервное заполнение по фактическому профилю при разреженных данных
     df_merged['primary_ndvi_reconstructed'] = df_merged['primary_ndvi_reconstructed'].fillna(df_merged['actual_fact_ndvi'])
     
-    # Z-Score relative to climatology norm
+    # Расчет Z-оценки относительно климатологической нормы
     df_merged['ndvi_zscore'] = compute_zscores(df_merged['primary_ndvi_reconstructed'], df_merged['clim_mean'], df_merged['clim_std'])
     df_merged['status'] = df_merged['ndvi_zscore'].apply(classify_status)
     
-    # Detect anomalies and generate agronomic diagnostics
+    # Детекция аномалий и формирование агрономических рекомендаций
     anoms = detect_anomaly_intervals(df_merged)
     anom_rep = generate_full_report(anoms)
     
@@ -807,19 +816,21 @@ def analyze_custom_polygon(req: CustomPolygonRequest):
 
 @app.get("/api/batch-status")
 def get_batch_status():
-    """Returns information about generated submission.csv."""
+    """Возвращает информацию о сгенерированном файле submission.csv."""
     sub_path = os.path.join(BASE_DIR, "submission.csv")
     if not os.path.exists(sub_path):
         return {"status": "not_generated"}
         
     df_sub = pd.read_csv(sub_path)
+    ndvi_col = 'primary_ndvi_true' if 'primary_ndvi_true' in df_sub.columns else ('primary_ndvi_pred' if 'primary_ndvi_pred' in df_sub.columns else None)
+    val_series = df_sub[ndvi_col].dropna() if (ndvi_col and ndvi_col in df_sub.columns) else pd.Series([0.0])
     return {
         "status": "ready",
         "rows_count": len(df_sub),
-        "polygons_count": int(df_sub['anon_polygon_id'].nunique()),
-        "mean_predicted_ndvi": round(float(df_sub['primary_ndvi_pred'].mean()), 4),
-        "min_predicted_ndvi": round(float(df_sub['primary_ndvi_pred'].min()), 4),
-        "max_predicted_ndvi": round(float(df_sub['primary_ndvi_pred'].max()), 4),
+        "polygons_count": int(df_sub['anon_polygon_id'].nunique()) if 'anon_polygon_id' in df_sub.columns else 0,
+        "mean_predicted_ndvi": round(float(val_series.mean()), 4),
+        "min_predicted_ndvi": round(float(val_series.min()), 4),
+        "max_predicted_ndvi": round(float(val_series.max()), 4),
         "file_size_kb": round(os.path.getsize(sub_path) / 1024, 1)
     }
 
@@ -936,7 +947,7 @@ def export_field_csv(req: ExportFieldCsvRequest):
         "csv_content": csv_str
     }
 
-# Mount static files for frontend UI
+# Подключение статических файлов для интерфейса пользователя
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")

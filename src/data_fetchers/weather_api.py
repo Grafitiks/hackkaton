@@ -46,7 +46,7 @@ def fetch_real_weather(lat: float, lon: float, year: int = 2024, start_date: Opt
     if cache_key in _WEATHER_CACHE:
         return _WEATHER_CACHE[cache_key].copy()
 
-    # Query Open-Meteo archive (has actual recorded data up to current day)
+    # Запрос архива фактической погоды Open-Meteo (содержит реальные метеоизмерения до текущего дня)
     base_url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": round(lat, 4),
@@ -76,7 +76,7 @@ def fetch_real_weather(lat: float, lon: float, year: int = 2024, start_date: Opt
             df["date_dt"] = pd.to_datetime(df["date"])
             df["doy"] = df["date_dt"].dt.dayofyear
             df["year"] = df["date_dt"].dt.year
-            # Fill small missing values
+            # Заполнение кратковременных пропусков линейной интерполяцией
             df["era5_temp_c"] = df["era5_temp_c"].interpolate(method="linear", limit_direction="both").fillna(18.0)
             df["era5_precip_mm"] = df["era5_precip_mm"].fillna(0.0)
             _WEATHER_CACHE[cache_key] = df
@@ -84,7 +84,7 @@ def fetch_real_weather(lat: float, lon: float, year: int = 2024, start_date: Opt
     except Exception as e:
         print(f"[Weather API] Ошибка при запросе Open-Meteo: {e}")
         
-    # Resilient fallback if network fails
+    # Резервный расчет климатических параметров при отсутствии интернет-соединения
     dates = pd.date_range(start_date, end_date, freq='D')
     doy = dates.dayofyear.values
     synth_temp = 12.0 + 16.0 * np.sin(np.pi * (doy - 90) / 150)

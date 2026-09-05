@@ -1,23 +1,27 @@
 :root {
-  --bg-main: #0a0e17;
-  --bg-panel: rgba(18, 24, 38, 0.85);
-  --bg-card: rgba(26, 34, 52, 0.7);
-  --border-color: rgba(255, 255, 255, 0.08);
-  --border-hover: rgba(0, 240, 255, 0.3);
+  --bg-main: #090d16;
+  --bg-panel: rgba(16, 23, 38, 0.88);
+  --bg-card: rgba(22, 32, 50, 0.75);
+  --border-color: rgba(255, 255, 255, 0.1);
+  --border-hover: rgba(0, 240, 255, 0.38);
   
-  --text-primary: #f3f4f6;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
 
   --accent-cyan: #00f0ff;
-  --accent-purple: #a855f7;
+  --accent-purple: #c084fc;
   --accent-green: #10b981;
   --accent-amber: #f59e0b;
-  --accent-rose: #ef4444;
-  --accent-blue: #3b82f6;
+  --accent-rose: #f43f5e;
+  --accent-blue: #38bdf8;
 
   --font-main: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+  
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 20px rgba(0, 240, 255, 0.2);
 }
 
 * {
@@ -31,45 +35,73 @@ body {
   color: var(--text-primary);
   font-family: var(--font-main);
   overflow-x: hidden;
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Header */
+/* Элегантный стиль полос прокрутки */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(10, 14, 23, 0.7);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.35);
+}
+
+/* Верхняя навигационная панель (Header) */
 .app-header {
-  background: rgba(13, 18, 28, 0.95);
-  backdrop-filter: blur(12px);
+  background: rgba(13, 18, 28, 0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--border-color);
-  padding: 12px 24px;
+  padding: 10px clamp(14px, 1.8vw, 24px);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   z-index: 1000;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-shrink: 0;
 }
 
 .logo-badge {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(168, 85, 247, 0.2));
-  border: 1px solid rgba(0, 240, 255, 0.4);
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.22), rgba(168, 85, 247, 0.22));
+  border: 1px solid rgba(0, 240, 255, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--accent-cyan);
-  font-size: 20px;
-  box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+  font-size: 22px;
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.25);
+  transition: transform 0.2s ease;
+}
+
+.logo-badge:hover {
+  transform: rotate(5deg) scale(1.05);
 }
 
 .app-title-group .app-name {
-  font-size: 18px;
+  font-size: clamp(17px, 1.25vw, 20px);
   font-weight: 800;
   letter-spacing: 0.5px;
   display: flex;
@@ -78,65 +110,78 @@ body {
 }
 
 .tag-version {
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 600;
   background: rgba(0, 240, 255, 0.15);
   color: var(--accent-cyan);
-  border: 1px solid rgba(0, 240, 255, 0.3);
-  padding: 2px 6px;
-  border-radius: 4px;
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  padding: 2px 7px;
+  border-radius: 5px;
   font-family: var(--font-mono);
 }
 
 .app-subtitle {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 
 .header-controls {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px 16px;
+  flex-wrap: wrap;
 }
 
 .control-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.control-item label {
+  font-weight: 600;
+  color: #cbd5e1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .form-select {
   background: #162032;
   border: 1px solid var(--border-color);
   color: var(--text-primary);
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: 7px;
+  font-size: 13.5px;
+  font-family: var(--font-main);
   outline: none;
   cursor: pointer;
+  height: 36px;
   transition: all 0.2s;
 }
 
 .form-select:hover, .form-select:focus {
   border-color: var(--accent-cyan);
-  box-shadow: 0 0 8px rgba(0, 240, 255, 0.2);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
 }
 
 optgroup {
   background: #111927;
   color: #94a3b8;
   font-weight: 700;
-  font-size: 11px;
-  padding: 4px 0;
+  font-size: 12px;
+  padding: 5px 0;
 }
 
 optgroup option {
   background: #162032;
   color: var(--text-primary);
   font-weight: 400;
-  font-size: 13px;
-  padding: 4px 8px;
+  font-size: 13.5px;
+  padding: 5px 10px;
 }
 
 #customGroupsOptgroup {
@@ -154,13 +199,15 @@ optgroup option {
   border: 1px solid var(--border-color);
   color: var(--accent-cyan);
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 7px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 31px;
+  height: 36px;
+  width: 36px;
+  font-size: 14px;
 }
 
 .date-range-group {
@@ -169,14 +216,15 @@ optgroup option {
   gap: 6px;
   background: #162032;
   border: 1px solid var(--border-color);
-  padding: 2px 6px;
-  border-radius: 6px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  height: 36px;
   transition: all 0.2s;
 }
 
 .date-range-group:hover, .date-range-group:focus-within {
   border-color: var(--accent-cyan);
-  box-shadow: 0 0 8px rgba(0, 240, 255, 0.2);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
 }
 
 .form-date-input {
@@ -184,11 +232,12 @@ optgroup option {
   border: none;
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   padding: 4px 2px;
   outline: none;
   cursor: text;
-  width: 92px;
+  width: 98px;
   text-align: center;
 }
 
@@ -200,25 +249,25 @@ optgroup option {
 .date-sep {
   color: var(--text-secondary);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .btn-apply-dates {
-  background: rgba(0, 240, 255, 0.12);
-  border: 1px solid rgba(0, 240, 255, 0.3);
+  background: rgba(0, 240, 255, 0.14);
+  border: 1px solid rgba(0, 240, 255, 0.35);
   color: var(--accent-cyan);
-  padding: 4px 7px;
-  border-radius: 4px;
+  padding: 5px 8px;
+  border-radius: 5px;
   cursor: pointer;
   transition: all 0.2s;
-  height: 24px;
-  font-size: 11px;
+  height: 28px;
+  font-size: 12px;
 }
 
 .btn-apply-dates:hover:not(:disabled) {
   background: var(--accent-cyan);
   color: #0b101b;
-  box-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.45);
 }
 
 .date-range-group.invalid {
@@ -258,7 +307,7 @@ optgroup option {
 .text-green { color: var(--accent-green); }
 
 /* ============================================================
-   Cyber-Agro Dark Theme for Flatpickr Calendar
+   Темная агрономическая тема для интерактивного календаря Flatpickr
    ============================================================ */
 .flatpickr-calendar {
   background: #0b101b !important;
@@ -413,31 +462,44 @@ span.flatpickr-weekday {
   color: rgba(255, 255, 255, 0.2) !important;
 }
 
-/* Buttons */
+/* Кнопки управления и интерактивные элементы */
 .btn {
   padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: 7px;
+  font-size: 13.5px;
   font-weight: 600;
+  font-family: var(--font-main);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   border: none;
   text-decoration: none;
+  height: 36px;
+  box-sizing: border-box;
+}
+
+.btn:active {
+  transform: translateY(1px) scale(0.98);
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #00c6ff, #0072ff);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(0, 114, 255, 0.3);
+  background: linear-gradient(135deg, #00f0ff, #00a8ff);
+  color: #041019;
+  font-weight: 700;
+  box-shadow: 0 2px 12px rgba(0, 240, 255, 0.35);
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, #00d2ff, #0080ff);
-  box-shadow: 0 4px 15px rgba(0, 114, 255, 0.4);
+  background: linear-gradient(135deg, #38bdf8, #00f0ff);
+  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.55);
   transform: translateY(-1px);
+}
+
+.btn-primary:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 1px 6px rgba(0, 240, 255, 0.4);
 }
 
 .btn-secondary {
@@ -449,79 +511,121 @@ span.flatpickr-weekday {
 .btn-secondary:hover {
   background: #27344d;
   border-color: var(--border-hover);
+  transform: translateY(-1px);
+}
+
+.btn-secondary:active {
+  transform: translateY(1px) scale(0.98);
+  background: #192233;
 }
 
 .btn-large {
-  padding: 12px 24px;
-  font-size: 14px;
+  padding: 10px 22px;
+  font-size: 14.5px;
   border-radius: 8px;
+  height: 42px;
 }
 
 .btn-icon {
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  font-size: 18px;
+  font-size: 19px;
   cursor: pointer;
+  transition: color 0.15s ease, transform 0.15s ease;
 }
 
 .btn-icon:hover {
   color: var(--text-primary);
+  transform: scale(1.12);
 }
 
-/* KPI Strip */
+.btn-icon:active {
+  transform: scale(0.92);
+}
+
+/* Информационная полоса ключевых показателей (KPI) */
 .kpi-strip {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
-  padding: 12px 24px;
-  background: #0d121c;
+  padding: 10px clamp(14px, 1.8vw, 24px);
+  background: #0b0f19;
   border-bottom: 1px solid var(--border-color);
 }
 
 .kpi-card {
   background: var(--bg-card);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border-color);
   padding: 10px 16px;
-  border-radius: 8px;
+  border-radius: 9px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s ease, box-shadow 0.22s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.kpi-card:hover {
+  border-color: rgba(0, 240, 255, 0.35);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45), 0 0 12px rgba(0, 240, 255, 0.12);
+  transform: translateY(-2px);
+}
+
+.kpi-card:hover::before {
+  opacity: 0.9;
 }
 
 .kpi-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 600;
+  letter-spacing: 0.6px;
+  font-weight: 700;
 }
 
 .kpi-value-row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   margin: 4px 0;
 }
 
 .kpi-value {
-  font-size: 20px;
+  font-size: clamp(20px, 1.35vw, 23px);
   font-weight: 700;
   font-family: var(--font-mono);
+  letter-spacing: -0.5px;
 }
 
 .kpi-unit {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
+  font-weight: 500;
 }
 
 .kpi-sub {
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 400;
 }
 
 .status-beacon {
@@ -529,6 +633,21 @@ span.flatpickr-weekday {
   height: 12px;
   border-radius: 50%;
   box-shadow: 0 0 10px currentColor;
+  flex-shrink: 0;
+  align-self: center;
+  animation: beaconPulse 2.8s ease-in-out infinite;
+}
+
+@keyframes beaconPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.88;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 1;
+    box-shadow: 0 0 14px currentColor;
+  }
 }
 
 .status-beacon.normal {
@@ -552,28 +671,30 @@ span.flatpickr-weekday {
 .highlight-green { color: var(--accent-green); }
 .highlight-rose { color: var(--accent-rose); }
 
-/* Main Layout */
+/* Основная сетка двухколоночной рабочей области */
 .main-layout {
   display: grid;
-  grid-template-columns: 42% 58%;
+  grid-template-columns: minmax(360px, 42%) 1fr;
   flex: 1;
   overflow: hidden;
   position: relative;
+  min-height: 0;
 }
 
-/* Map Column */
+/* Колонка интерактивной карты геомониторинга */
 .map-column {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border-color);
   background: #080c14;
   position: relative;
+  min-height: 380px;
 }
 
 .panel-header {
   padding: 10px 16px;
-  background: rgba(18, 24, 38, 0.9);
-  backdrop-filter: blur(8px);
+  background: rgba(18, 24, 38, 0.94);
+  backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
@@ -581,8 +702,8 @@ span.flatpickr-weekday {
 }
 
 .panel-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -591,40 +712,56 @@ span.flatpickr-weekday {
 
 .map-layer-controls {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .layer-btn {
   background: #162032;
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 4px;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 6px;
   cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.layer-btn:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.layer-btn:active {
+  transform: translateY(1px) scale(0.97);
 }
 
 .layer-btn.active {
-  background: rgba(0, 240, 255, 0.15);
+  background: rgba(0, 240, 255, 0.18);
   color: var(--accent-cyan);
-  border-color: rgba(0, 240, 255, 0.4);
+  border-color: rgba(0, 240, 255, 0.45);
+  font-weight: 600;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
 }
 
 .map-container {
   flex: 1;
   width: 100%;
+  min-height: 250px;
 }
 
 .map-footer {
   padding: 8px 16px;
-  background: rgba(13, 18, 28, 0.9);
+  background: rgba(13, 18, 28, 0.95);
   border-top: 1px solid var(--border-color);
 }
 
 .map-legend {
   display: flex;
-  gap: 16px;
-  font-size: 11px;
+  gap: 18px;
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--text-secondary);
 }
 
@@ -635,9 +772,9 @@ span.flatpickr-weekday {
 }
 
 .color-box {
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
 }
 
 .color-box.selected-field {
@@ -655,7 +792,7 @@ span.flatpickr-weekday {
   border: 2px solid var(--accent-purple);
 }
 
-/* Analytics Column */
+/* Аналитическая колонка и панели графиков */
 .analytics-column {
   display: flex;
   flex-direction: column;
@@ -666,7 +803,7 @@ span.flatpickr-weekday {
   position: relative;
 }
 
-/* Analytics Loading Overlay */
+/* Оверлей анимации загрузки и запросов к GEE */
 .analytics-loading-overlay {
   position: absolute;
   inset: 0;
@@ -775,7 +912,7 @@ span.flatpickr-weekday {
 }
 
 .loader-sub {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-muted);
 }
 
@@ -786,11 +923,11 @@ span.flatpickr-weekday {
   overflow: hidden;
 }
 
-/* Data Sources Attribution Panel */
+/* Панель атрибуции источников данных и спутниковых сенсоров */
 .data-source-panel {
-  background: rgba(15, 23, 42, 0.7);
-  border: 1px solid rgba(0, 240, 255, 0.22);
-  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  border-radius: 9px;
   margin-bottom: 2px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
   transition: all 0.3s ease;
@@ -798,37 +935,38 @@ span.flatpickr-weekday {
 
 .data-source-panel:hover {
   border-color: rgba(0, 240, 255, 0.45);
-  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.09);
+  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.12);
 }
 
 .ds-header {
-  padding: 7px 14px;
-  background: rgba(22, 32, 50, 0.75);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 8px 14px;
+  background: rgba(22, 32, 50, 0.8);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
 .ds-title {
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--accent-cyan);
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   letter-spacing: 0.3px;
 }
 
 .active-field-badge {
   font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(0, 240, 255, 0.12);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 5px;
+  background: rgba(0, 240, 255, 0.14);
   color: #67e8f9;
-  border: 1px solid rgba(0, 240, 255, 0.3);
-  max-width: 250px;
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  max-width: 260px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -837,8 +975,8 @@ span.flatpickr-weekday {
 .data-source-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px 16px;
-  padding: 8px 14px;
+  gap: 8px 16px;
+  padding: 10px 14px;
 }
 
 .ds-item {
@@ -848,19 +986,19 @@ span.flatpickr-weekday {
 }
 
 .ds-label {
-  font-size: 10px;
+  font-size: 11.5px;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 600;
+  letter-spacing: 0.6px;
+  font-weight: 700;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 
 .ds-val {
-  font-size: 11.5px;
-  color: #e2e8f0;
+  font-size: 13px;
+  color: #f1f5f9;
   font-family: var(--font-main);
   white-space: nowrap;
   overflow: hidden;
@@ -873,10 +1011,10 @@ span.flatpickr-weekday {
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 14px;
-  background: rgba(22, 32, 50, 0.5);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  gap: 10px;
+  padding: 9px 16px;
+  background: rgba(22, 32, 50, 0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .panel-title-group {
@@ -887,25 +1025,25 @@ span.flatpickr-weekday {
 
 .chart-days-badge {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  padding: 2px 8px;
+  padding: 3px 9px;
   border-radius: 12px;
-  background: rgba(0, 240, 255, 0.1);
+  background: rgba(0, 240, 255, 0.12);
   color: var(--accent-cyan);
-  border: 1px solid rgba(0, 240, 255, 0.3);
+  border: 1px solid rgba(0, 240, 255, 0.35);
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   letter-spacing: 0.2px;
   transition: all 0.25s ease;
 }
 
 .chart-days-badge.zoomed {
-  background: rgba(168, 85, 247, 0.16);
+  background: rgba(168, 85, 247, 0.18);
   color: #c084fc;
-  border-color: rgba(168, 85, 247, 0.45);
-  box-shadow: 0 0 10px rgba(168, 85, 247, 0.2);
+  border-color: rgba(168, 85, 247, 0.5);
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.25);
 }
 
 .chart-header-controls {
@@ -919,7 +1057,7 @@ span.flatpickr-weekday {
   display: inline-flex;
   align-items: center;
   background: rgba(15, 23, 42, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   padding: 2px;
   gap: 2px;
@@ -930,43 +1068,50 @@ span.flatpickr-weekday {
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  width: 26px;
-  height: 24px;
-  border-radius: 4px;
+  width: 28px;
+  height: 26px;
+  border-radius: 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .chart-tool-btn:hover {
-  background: rgba(0, 240, 255, 0.15);
+  background: rgba(0, 240, 255, 0.18);
   color: var(--accent-cyan);
+  transform: translateY(-1px);
 }
 
 .chart-tool-btn:active {
-  transform: scale(0.92);
+  transform: translateY(1px) scale(0.92);
 }
 
 .chart-tool-btn.reset-btn {
   width: auto;
-  padding: 0 8px;
-  gap: 5px;
+  padding: 0 10px;
+  gap: 6px;
   font-family: var(--font-main);
-  font-size: 10.5px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .chart-tool-btn.reset-btn:hover {
-  background: rgba(16, 185, 129, 0.18);
+  background: rgba(16, 185, 129, 0.22);
   color: var(--accent-green);
+  transform: translateY(-1px);
+}
+
+.chart-tool-btn.reset-btn:active {
+  transform: translateY(1px) scale(0.96);
 }
 
 .chart-panel .chart-wrapper {
-  padding: 12px;
-  height: 250px;
+  padding: 14px;
+  height: 270px;
+  min-height: 240px;
   position: relative;
 }
 
@@ -975,8 +1120,9 @@ span.flatpickr-weekday {
 }
 
 .weather-panel .chart-wrapper-weather {
-  padding: 12px;
-  height: 140px;
+  padding: 14px;
+  height: 160px;
+  min-height: 140px;
   position: relative;
 }
 
@@ -986,42 +1132,67 @@ span.flatpickr-weekday {
 
 .chart-badges {
   display: flex;
-  gap: 12px;
-  font-size: 11px;
+  gap: 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.sensor-badge, .weather-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: transform 0.15s ease, filter 0.15s ease;
+  cursor: default;
+}
+
+.sensor-badge:hover, .weather-badge:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.25);
 }
 
 .sensor-badge.s2 { color: #00f0ff; }
 .sensor-badge.ls { color: #10b981; }
 .sensor-badge.mod { color: #f59e0b; }
 .sensor-badge.rec { color: #ffffff; }
-.sensor-badge.clim { color: rgba(16, 185, 129, 0.6); }
+.sensor-badge.clim { color: rgba(16, 185, 129, 0.75); }
 
 .weather-badge.temp { color: #f97316; }
 .weather-badge.precip { color: #38bdf8; }
 
-/* Anomalies List */
+/* Карточки выявленных аномалий вегетации */
 .anomalies-list {
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 200px;
+  max-height: 230px;
   overflow-y: auto;
 }
 
 .anomaly-card {
-  background: rgba(22, 32, 50, 0.6);
+  background: rgba(22, 32, 50, 0.65);
   border-left: 4px solid var(--accent-amber);
-  border-radius: 6px;
-  padding: 10px 14px;
+  border-radius: 7px;
+  padding: 11px 16px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.anomaly-card:hover {
+  transform: translateX(4px);
+  background: rgba(26, 38, 60, 0.85);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
 .anomaly-card.critical {
   border-left-color: var(--accent-rose);
-  background: rgba(45, 20, 25, 0.4);
+  background: rgba(45, 20, 25, 0.45);
+}
+
+.anomaly-card.critical:hover {
+  background: rgba(55, 24, 30, 0.55);
 }
 
 .anomaly-card-header {
@@ -1032,35 +1203,38 @@ span.flatpickr-weekday {
 
 .anomaly-date-badge {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .anomaly-zscore-badge {
   font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 2px 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 3px 7px;
   border-radius: 4px;
-  background: rgba(239, 68, 68, 0.2);
-  color: var(--accent-rose);
+  background: rgba(239, 68, 68, 0.22);
+  color: #fda4af;
 }
 
 .anomaly-cause {
-  font-size: 12px;
-  color: #e2e8f0;
+  font-size: 13.5px;
+  color: #f1f5f9;
+  line-height: 1.45;
 }
 
 .anomaly-recommendation {
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-secondary);
   font-style: italic;
   display: flex;
   align-items: flex-start;
   gap: 6px;
+  line-height: 1.4;
 }
 
-/* Field Glowing Animation during Drawing Mode */
+/* Анимация пульсирующего свечения контура при оцифровке */
 @keyframes subtlePulseGlow {
   0% {
     filter: drop-shadow(0 0 3px rgba(0, 240, 255, 0.4));
@@ -1085,7 +1259,41 @@ span.flatpickr-weekday {
   cursor: pointer !important;
 }
 
-/* Cursor constraints */
+/* Кинематографическая подсветка и интерактивность контуров полей */
+path.verified-field-path {
+  transition: stroke-width 0.25s ease, fill-opacity 0.25s ease, filter 0.25s ease;
+  cursor: pointer !important;
+}
+
+path.verified-field-path:hover {
+  stroke-width: 4.5px !important;
+  fill-opacity: 0.45 !important;
+  filter: drop-shadow(0 0 12px rgba(0, 240, 255, 0.65)) !important;
+}
+
+@keyframes cinematicFieldGlow {
+  0% {
+    stroke-width: 4px;
+    filter: drop-shadow(0 0 6px var(--accent-cyan));
+  }
+  50% {
+    stroke-width: 6.5px;
+    filter: drop-shadow(0 0 20px var(--accent-cyan)) drop-shadow(0 0 35px rgba(0, 240, 255, 0.75));
+    fill-opacity: 0.58;
+  }
+  100% {
+    stroke-width: 4px;
+    filter: drop-shadow(0 0 8px var(--accent-cyan));
+    fill-opacity: 0.48;
+  }
+}
+
+path.cinematic-field-selected {
+  animation: cinematicFieldGlow 1.6s ease-out;
+  cursor: pointer !important;
+}
+
+/* Ограничения и стили курсора */
 .cursor-forbidden {
   cursor: not-allowed !important;
 }
@@ -1119,7 +1327,7 @@ span.flatpickr-weekday {
   color: #67e8f9;
 }
 
-/* Geo Coordinates Badge */
+/* Бейдж географических координат центроида */
 .geo-coords-badge {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1134,39 +1342,42 @@ span.flatpickr-weekday {
   margin-top: 4px;
 }
 
-/* Toast Notifications */
+/* Всплывающие системные уведомления (Toast) */
 .app-toast {
   position: fixed;
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%) translateY(0);
   background: rgba(15, 23, 42, 0.95);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--accent-cyan);
   color: #fff;
-  padding: 10px 20px;
-  border-radius: 8px;
-  font-size: 13px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  padding: 11px 22px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  font-weight: 500;
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.65), 0 0 16px rgba(0, 240, 255, 0.25);
   z-index: 11000;
   display: flex;
   align-items: center;
   gap: 10px;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
 }
 
 .app-toast.error {
   border-color: var(--accent-rose);
   color: #fecdd3;
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.65), 0 0 16px rgba(244, 63, 94, 0.25);
 }
 
 .app-toast.hidden {
   opacity: 0;
-  transform: translateX(-50%) translateY(20px);
+  transform: translateX(-50%) translateY(14px) scale(0.96);
   pointer-events: none;
 }
 
-/* Floating Draw Control Bar */
+/* Плавающая панель инструментов оцифровки полей */
 .draw-floating-toolbar {
   position: absolute;
   top: 54px;
@@ -1325,7 +1536,7 @@ span.flatpickr-weekday {
   color: #fff;
 }
 
-/* Drawing Help Banner */
+/* Информационный баннер режима оцифровки */
 .drawing-guide-banner {
   position: absolute;
   top: 10px;
@@ -1358,16 +1569,34 @@ span.flatpickr-weekday {
   box-shadow: 0 0 10px var(--accent-cyan);
 }
 
-/* Modal */
+/* Базовые стили модальных окон */
+@keyframes backdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalPopIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2000;
+  animation: backdropFadeIn 0.2s ease;
 }
 
 .modal-backdrop.hidden,
@@ -1381,14 +1610,17 @@ span.flatpickr-weekday {
   background: #162032;
   border: 1px solid var(--border-color);
   width: 520px;
+  max-width: 92vw;
+  max-height: 90vh;
   border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  overflow-y: auto;
+  animation: modalPopIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .modal-header {
   padding: 16px 20px;
-  background: rgba(26, 36, 56, 0.8);
+  background: rgba(26, 36, 56, 0.85);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
@@ -1396,7 +1628,7 @@ span.flatpickr-weekday {
 }
 
 .modal-title {
-  font-size: 16px;
+  font-size: 16.5px;
   font-weight: 700;
   color: var(--text-primary);
   display: flex;
@@ -1412,9 +1644,9 @@ span.flatpickr-weekday {
 }
 
 .modal-description {
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .batch-status-box {
@@ -1425,7 +1657,7 @@ span.flatpickr-weekday {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 13px;
+  font-size: 13.5px;
 }
 
 .status-row {
@@ -1442,7 +1674,7 @@ span.flatpickr-weekday {
   margin-top: 8px;
 }
 
-/* Custom Field Settings Modal Styles */
+/* Стили модального окна настройки параметров поля */
 .form-group-modal {
   display: flex;
   flex-direction: column;
@@ -1450,9 +1682,9 @@ span.flatpickr-weekday {
 }
 
 .modal-label {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: #cbd5e1;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1462,9 +1694,9 @@ span.flatpickr-weekday {
   background: #0f1624;
   border: 1px solid var(--border-color);
   color: var(--text-primary);
-  padding: 8px 12px;
+  padding: 9px 12px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 13.5px;
   outline: none;
   transition: all 0.2s;
   width: 100%;
@@ -1473,6 +1705,12 @@ span.flatpickr-weekday {
 .modal-input:focus {
   border-color: var(--accent-cyan);
   box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+}
+
+.modal-input.input-error,
+.form-select.input-error {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.45) !important;
 }
 
 .color-palette-group {
@@ -2185,7 +2423,7 @@ span.flatpickr-weekday {
 
 .region-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px;
   margin-bottom: 20px;
 }
@@ -2199,20 +2437,22 @@ span.flatpickr-weekday {
 }
 
 .region-kpi-title {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
   text-transform: uppercase;
   margin-bottom: 6px;
+  font-weight: 600;
 }
 
 .region-kpi-value {
-  font-size: 17px;
+  font-size: 20px;
+  font-family: var(--font-mono);
   font-weight: 700;
   margin-bottom: 4px;
 }
 
 .region-kpi-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -2245,7 +2485,7 @@ span.flatpickr-weekday {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 13px;
+  font-size: 13.5px;
   transition: all 0.2s;
 }
 
@@ -2273,7 +2513,7 @@ span.flatpickr-weekday {
   border: 1px solid rgba(244, 63, 94, 0.35);
   padding: 8px 14px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 13.5px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -2286,6 +2526,70 @@ span.flatpickr-weekday {
   border-color: #f43f5e;
   color: #fff;
   box-shadow: 0 0 12px rgba(244, 63, 94, 0.35);
+}
+
+/* ============================================================
+   Адаптивность и динамическое масштабирование страницы
+   Обеспечивает комфортный зум (Ctrl+/Ctrl-) и работу на любых экранах
+   ============================================================ */
+@media (max-width: 1280px) {
+  .main-layout {
+    grid-template-columns: minmax(340px, 45%) 1fr;
+  }
+}
+
+@media (max-width: 1024px) {
+  body {
+    overflow-y: auto;
+    height: auto;
+  }
+  .main-layout {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+  .map-column {
+    min-height: 440px;
+    height: 52vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .analytics-column {
+    overflow-y: visible;
+    height: auto;
+  }
+  .kpi-strip {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 10px 14px;
+  }
+  .header-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .kpi-strip {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .data-source-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   Поддержка режима уменьшения движения (Accessibility)
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 

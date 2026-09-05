@@ -4,14 +4,18 @@ import pickle
 import pandas as pd
 import numpy as np
 
-# Ensure local imports work
+# Обеспечение корректного импорта локальных модулей проекта
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from src.features.feature_builder import enrich_weather, extract_gap_features, FEATURE_COLUMNS
 
-def predict_gaps(test_df_path: str, model_artifact_path: str = "artifacts/models/ensemble_models.pkl", clim_artifact_path: str = "artifacts/models/climatology.pkl") -> pd.DataFrame:
+def predict_gaps(
+    test_df_path: str,
+    model_artifact_path: str = "artifacts/models/ensemble_models.pkl",
+    clim_artifact_path: str = "artifacts/models/climatology.pkl"
+) -> pd.DataFrame:
     """
-    Пакетный инференс ансамбля градиентного бустинга (LightGBM + CatBoost)
-    для высокоточного восстановления пропусков NDVI на тестовых полигонах.
+    Пакетный инференс ансамбля градиентного бустинга (LightGBM Huber + CatBoost)
+    с калибровкой сенсоров, фильтрацией облачных теней и кросс-полигональной фенологией.
     """
     print(f"[Инференс] Загрузка тестового датасета: {test_df_path}...")
     df_test = pd.read_csv(test_df_path, encoding='utf-8')
@@ -19,8 +23,12 @@ def predict_gaps(test_df_path: str, model_artifact_path: str = "artifacts/models
     df_test['year'] = df_test['date_dt'].dt.year
     df_test = df_test.sort_values(['anon_polygon_id', 'date_dt']).reset_index(drop=True)
     
-    # Выделение строк искусственных и облачных пропусков (is_synthetic_gap)
-    gap_rows = df_test[df_test['is_synthetic_gap'] == True]
+    # Выделение строк целевых пропусков (is_synthetic_gap)
+    if 'is_synthetic_gap' in df_test.columns:
+        gap_rows = df_test[df_test['is_synthetic_gap'] == True]
+    else:
+        gap_rows = df_test[df_test['primary_ndvi'].isna()]
+        
     print(f"[Инференс] Обнаружено целевых точек пропусков: {len(gap_rows)}.")
     gap_indices = gap_rows.index.values
     
@@ -32,32 +40,45 @@ def predict_gaps(test_df_path: str, model_artifact_path: str = "artifacts/models
     crop_clim = clim_data['crop_clim']
     global_clim = clim_data['global_clim']
     
-    # Обогащение агрометеорологическими параметрами ERA5-Land
-    print("[Инференс] Обогащение метеопараметрами...")
-    df_test = enrich_weather(df_test)
-    
-    # Формирование признакового пространства без утечки данных
-    print("[Инференс] Генерация двунаправленных признаков...")
-    gap_features = extract_gap_features(df_test, gap_indices, poly_clim, crop_clim, global_clim)
-    gap_features = gap_features.sort_values('index').reset_index(drop=True)
-    
-    y_linear = gap_features['y_linear'].values
-    
-    # Загрузка ансамблевых моделей
+    # Загрузка моделей и расписания спутниковых пролетов
     print(f"[Инференс] Загрузка моделей бустинга: {model_artifact_path}...")
     with open(model_artifact_path, "rb") as f:
         bundle = pickle.load(f)
     lgb_models = bundle['lgb_models']
     cat_models = bundle['cat_models']
+    date_sat_stats = bundle.get('date_sat_stats', None)
+    date_crop_stats = bundle.get('date_crop_stats', None)
+    w_lgb = bundle.get('lgb_weight', 0.6)
+    w_cat = bundle.get('cat_weight', 0.4)
+    feature_cols = bundle.get('feature_cols', FEATURE_COLUMNS)
     
-    X = gap_features[FEATURE_COLUMNS].copy()
-    for c in ['crop_type']:
-        X[c] = X[c].astype('category')
-        
+    # Обогащение агрометеорологическими параметрами ERA5-Land
+    print("[Инференс] Обогащение метеопараметрами...")
+    df_test = enrich_weather(df_test)
+    
+    # Формирование признакового пространства без утечки данных
+    print("[Инференс] Генерация двунаправленных сенсорно-фенологических признаков...")
+    gap_features = extract_gap_features(
+        df_test,
+        gap_indices=gap_indices,
+        poly_clim_df=poly_clim,
+        crop_clim_df=crop_clim,
+        global_clim_df=global_clim,
+        date_sat_stats=date_sat_stats,
+        date_crop_stats=date_crop_stats
+    )
+    gap_features = gap_features.sort_values('index').reset_index(drop=True)
+    
+    y_base = gap_features['y_linear'].values
+    
+    # Подготовка матриц признаков
+    cols_to_use = [c for c in feature_cols if c in gap_features.columns]
+    X = gap_features[cols_to_use].copy()
+    X['crop_type'] = X['crop_type'].astype('category')
+    
     X_cat = X.copy()
-    for c in ['crop_type']:
-        X_cat[c] = X_cat[c].astype(str)
-        
+    X_cat['crop_type'] = X_cat['crop_type'].astype(str)
+    
     print(f"[Инференс] Прогнозирование ансамблем: {len(lgb_models)} LightGBM + {len(cat_models)} CatBoost...")
     preds_lgb = np.zeros(len(X))
     for m in lgb_models:
@@ -67,15 +88,15 @@ def predict_gaps(test_df_path: str, model_artifact_path: str = "artifacts/models
     for m in cat_models:
         preds_cat += m.predict(X_cat) / len(cat_models)
         
-    # Блендинг ансамбля (60% LightGBM + 40% CatBoost) и сложение с линейным базисом
-    delta_pred = 0.6 * preds_lgb + 0.4 * preds_cat
-    primary_ndvi_pred = np.clip(y_linear + delta_pred, -0.2, 1.0)
+    # Блендинг ансамбля и сложение с линейным базисом
+    delta_pred = w_lgb * preds_lgb + w_cat * preds_cat
+    primary_ndvi_pred = np.clip(y_base + delta_pred, -0.05, 0.98)
     
     # Формирование финального датафрейма для отправки решения (submission)
     sub = pd.DataFrame({
-        'anon_polygon_id': gap_features['anon_polygon_id'].astype(str),
         'date': gap_features['date'].astype(str),
-        'primary_ndvi_pred': primary_ndvi_pred
-    })
+        'primary_ndvi_true': primary_ndvi_pred,
+        'anon_polygon_id': gap_features['anon_polygon_id'].astype(str)
+    })[['date', 'primary_ndvi_true', 'anon_polygon_id']]
     
     return sub

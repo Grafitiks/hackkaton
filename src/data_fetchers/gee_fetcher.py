@@ -251,7 +251,7 @@ def fetch_gee_climatology(coords: List[List[float]]) -> Optional[pd.DataFrame]:
         import ee
         poly = ee.Geometry.Polygon(coords)
         
-        # 8-year continuous global historical composite (2016-2024)
+        # 8-летний непрерывный глобальный исторический композит (2016-2024)
         modis = (
             ee.ImageCollection('MODIS/061/MOD13Q1')
             .filterBounds(poly)
@@ -289,7 +289,7 @@ def fetch_gee_climatology(coords: List[List[float]]) -> Optional[pd.DataFrame]:
             clim_stats = df_hist.groupby('doy')['ndvi'].agg(['mean', 'std']).reset_index()
             clim_stats.columns = ['doy', 'clim_mean', 'clim_std']
             
-            # Map across all 366 days of year with smooth spline/rolling
+            # Построение профиля нормы на 366 дней года со скользящим сглаживанием
             full_doy = pd.DataFrame({'doy': list(range(1, 367))})
             clim_df = full_doy.merge(clim_stats, on='doy', how='left')
             clim_df['clim_mean'] = clim_df['clim_mean'].interpolate(method='linear', limit_direction='both')

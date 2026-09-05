@@ -1,138 +1,176 @@
 import pandas as pd
 import numpy as np
 
+# Калибровочные полиномы для перевода сенсоров в эталонное пространство Sentinel-2 (10м)
+POLY_LS_TO_S2 = [0.01770809, 1.00205161, -0.04086545]
+POLY_MOD_TO_S2 = [0.29875542, 0.747099, -0.04116821]
+
+POLY_S2_TO_LS = [-0.0139963, 0.9290673, 0.06358853]
+POLY_S2_TO_MOD = [-0.16747713, 0.87583154, 0.16369809]
+
+def to_s2_space(val: float, sensor_code: int) -> float:
+    """Приведение исходного NDVI любого сенсора к эталонной шкале Sentinel-2."""
+    if np.isnan(val):
+        return np.nan
+    if sensor_code == 0:
+        return val
+    elif sensor_code == 1:
+        return POLY_LS_TO_S2[0] * val**2 + POLY_LS_TO_S2[1] * val + POLY_LS_TO_S2[2]
+    else:
+        return POLY_MOD_TO_S2[0] * val**2 + POLY_MOD_TO_S2[1] * val + POLY_MOD_TO_S2[2]
+
+def from_s2_space(val: float, sensor_code: int) -> float:
+    """Отображение гармонизированного прогноза S2 в шкалу ожидаемого сенсора пропуска."""
+    if np.isnan(val):
+        return np.nan
+    if sensor_code == 0:
+        return val
+    elif sensor_code == 1:
+        return POLY_S2_TO_LS[0] * val**2 + POLY_S2_TO_LS[1] * val + POLY_S2_TO_LS[2]
+    else:
+        return POLY_S2_TO_MOD[0] * val**2 + POLY_S2_TO_MOD[1] * val + POLY_S2_TO_MOD[2]
+
 def enrich_weather(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Интерполяция непрерывных метеорологических параметров ERA5-Land и расчет
-    накопленных агроклиматических метрик (суммы осадков за 7 и 14 дней, средняя температура).
-    Позволяет учесть гидротермический стресс и засушливые фазы.
-    """
+    """Интерполяция метеопараметров ERA5-Land и агроклиматические агрегаты за 7 и 14 дней."""
     df = df.copy()
     if 'era5_temp_c' in df.columns:
-        df['era5_temp_interp'] = df.groupby('anon_polygon_id')['era5_temp_c'].transform(
+        df['temp_interp'] = df.groupby('anon_polygon_id')['era5_temp_c'].transform(
             lambda s: s.interpolate(method='linear', limit_direction='both')
-        )
+        ).fillna(15.0)
     else:
-        df['era5_temp_interp'] = 20.0
+        df['temp_interp'] = 15.0
 
     if 'era5_precip_mm' in df.columns:
-        df['era5_precip_interp'] = df.groupby('anon_polygon_id')['era5_precip_mm'].transform(
+        df['precip_interp'] = df.groupby('anon_polygon_id')['era5_precip_mm'].transform(
             lambda s: s.fillna(0.0)
-        )
+        ).fillna(0.0)
     else:
-        df['era5_precip_interp'] = 0.0
+        df['precip_interp'] = 0.0
 
-    # Агрономические агрегаты: дефицит влаги за 1-2 недели критически влияет на скорость деградации биомассы
-    df['precip_sum_7'] = df.groupby('anon_polygon_id')['era5_precip_interp'].transform(
+    df['precip_7'] = df.groupby('anon_polygon_id')['precip_interp'].transform(
         lambda s: s.rolling(7, min_periods=1).sum()
     )
-    df['precip_sum_14'] = df.groupby('anon_polygon_id')['era5_precip_interp'].transform(
+    df['precip_14'] = df.groupby('anon_polygon_id')['precip_interp'].transform(
         lambda s: s.rolling(14, min_periods=1).sum()
     )
-    df['temp_mean_7'] = df.groupby('anon_polygon_id')['era5_temp_interp'].transform(
+    df['temp_7'] = df.groupby('anon_polygon_id')['temp_interp'].transform(
         lambda s: s.rolling(7, min_periods=1).mean()
     )
     return df
 
-def extract_gap_features(df: pd.DataFrame, gap_indices: np.ndarray, poly_clim_df, crop_clim_df, global_clim_df) -> pd.DataFrame:
+def clean_anchor_series(df: pd.DataFrame, gap_indices: np.ndarray = None) -> pd.DataFrame:
+    """Фильтрация артефактов и ложных облачных теней из опорных измерений."""
+    df_clean = df.copy()
+    if gap_indices is not None and len(gap_indices) > 0:
+        df_clean.loc[gap_indices, 'primary_ndvi'] = np.nan
+
+    for pid, grp in df_clean.groupby('anon_polygon_id'):
+        sub = grp[grp['primary_ndvi'].notna()]
+        if len(sub) < 3:
+            continue
+        vals = sub['primary_ndvi'].values
+        dates = sub['date_dt'].values
+        idx_arr = sub.index.values
+        
+        for i in range(1, len(vals) - 1):
+            dt1 = (dates[i] - dates[i - 1]).astype('timedelta64[D]').astype(int)
+            dt2 = (dates[i + 1] - dates[i]).astype('timedelta64[D]').astype(int)
+            if dt1 <= 12 and dt2 <= 12:
+                if vals[i] < vals[i - 1] - 0.25 and vals[i] < vals[i + 1] - 0.25:
+                    df_clean.loc[idx_arr[i], 'primary_ndvi'] = np.nan
+            if vals[i] < -0.05 or vals[i] > 1.05:
+                df_clean.loc[idx_arr[i], 'primary_ndvi'] = np.nan
+                
+    return df_clean
+
+def get_sensor_bias(sensor_code: int, ndvi: float) -> float:
+    """Эмпирическая нелинейная калибровочная функция смещения сенсоров."""
+    ndvi_c = np.clip(ndvi, 0.0, 0.9)
+    if sensor_code == 0:
+        return 0.0
+    elif sensor_code == 1:
+        return 0.045 - 0.050 * ndvi_c
+    else:  # Спектрометр MODIS (250м)
+        return 0.120 - 0.180 * ndvi_c
+
+def extract_gap_features(
+    df: pd.DataFrame,
+    gap_indices: np.ndarray,
+    poly_clim_df: pd.DataFrame,
+    crop_clim_df: pd.DataFrame,
+    global_clim_df: pd.DataFrame,
+    date_sat_stats: pd.DataFrame = None,
+    date_crop_stats: pd.DataFrame = None,
+    is_train: bool = False
+) -> pd.DataFrame:
     """
-    Генерация двунаправленных временных и агроклиматических признаков для точек пропуска.
-    
-    Архитектурная защита: предотвращение утечки данных (Data Leakage) — значения NDVI
-    в точках пропуска предварительно заменяются на NaN, признаковое пространство строится
-    исключительно на базе фактически доступных наблюдений до и после облачного окна.
+    Унифицированная генерация признаков для точек пропуска.
+    Включает межсенсорную гармонизацию, региональные аномалии, кривизну и метеопараметры.
     """
-    df_work = df.copy()
-    # Изоляция целевого признака в окне пропуска для исключения заглядывания вперед
-    df_work.loc[gap_indices, 'primary_ndvi'] = np.nan
-    
-    known = df_work[df_work['primary_ndvi'].notna()].copy()
+    df_clean = clean_anchor_series(df, None if is_train else gap_indices)
+    known = df_clean[df_clean['primary_ndvi'].notna()].copy()
     
     samples = []
-    for poly_id, p_df in df_work.groupby('anon_polygon_id'):
-        p_gaps = p_df[p_df.index.isin(gap_indices)]
+    
+    for poly_id, grp in df_clean.groupby('anon_polygon_id'):
+        p_gaps = grp[grp.index.isin(gap_indices)]
         if p_gaps.empty:
             continue
-        
+            
         p_known = known[known['anon_polygon_id'] == poly_id]
         if p_known.empty:
             continue
             
-        p_known_dates = p_known['date_dt'].values
-        p_known_vals = p_known['primary_ndvi'].values
-        p_known_s2 = p_known['s2_ndvi'].values if 's2_ndvi' in p_known.columns else np.full(len(p_known), np.nan)
-        p_known_ls = p_known['landsat_ndvi'].values if 'landsat_ndvi' in p_known.columns else np.full(len(p_known), np.nan)
-        p_known_mod = p_known['modis_ndvi'].values if 'modis_ndvi' in p_known.columns else np.full(len(p_known), np.nan)
-        
-        evi_s = p_known['s2_evi'] if 's2_evi' in p_known.columns else pd.Series(np.nan, index=p_known.index)
-        evi_l = p_known['landsat_evi'] if 'landsat_evi' in p_known.columns else pd.Series(np.nan, index=p_known.index)
-        evi_m = p_known['modis_evi'] if 'modis_evi' in p_known.columns else pd.Series(np.nan, index=p_known.index)
-        p_known_evi = evi_s.fillna(evi_l).fillna(evi_m).values
-        
-        ndwi_s = p_known['s2_ndwi'] if 's2_ndwi' in p_known.columns else pd.Series(np.nan, index=p_known.index)
-        ndwi_l = p_known['landsat_ndwi'] if 'landsat_ndwi' in p_known.columns else pd.Series(np.nan, index=p_known.index)
-        p_known_ndwi = ndwi_s.fillna(ndwi_l).values
+        p_dates = p_known['date_dt'].values
+        p_vals = p_known['primary_ndvi'].values
+        p_s2 = p_known['s2_ndvi'].values if 's2_ndvi' in p_known.columns else np.full(len(p_known), np.nan)
+        p_ls = p_known['landsat_ndvi'].values if 'landsat_ndvi' in p_known.columns else np.full(len(p_known), np.nan)
         
         for idx, row in p_gaps.iterrows():
             t = np.datetime64(row['date_dt'])
             
-            prev_idx = np.where(p_known_dates < t)[0]
-            next_idx = np.where(p_known_dates > t)[0]
+            prev_idx = np.where(p_dates < t)[0]
+            next_idx = np.where(p_dates > t)[0]
             
-            has_prev = len(prev_idx) > 0
-            has_next = len(next_idx) > 0
-            
-            i_p1 = prev_idx[-1] if has_prev else None
+            has_p = len(prev_idx) > 0
+            has_n = len(next_idx) > 0
+            if not has_p and not has_n:
+                continue
+                
+            i_p1 = prev_idx[-1] if has_p else None
             i_p2 = prev_idx[-2] if len(prev_idx) > 1 else i_p1
-            
-            i_n1 = next_idx[0] if has_next else None
+            i_n1 = next_idx[0] if has_n else None
             i_n2 = next_idx[1] if len(next_idx) > 1 else i_n1
             
-            dt_p1 = (row['date_dt'] - pd.to_datetime(p_known_dates[i_p1])).days if has_prev else 999
-            dt_p2 = (row['date_dt'] - pd.to_datetime(p_known_dates[i_p2])).days if i_p2 is not None else 999
-            dt_n1 = (pd.to_datetime(p_known_dates[i_n1]) - row['date_dt']).days if has_next else 999
-            dt_n2 = (pd.to_datetime(p_known_dates[i_n2]) - row['date_dt']).days if i_n2 is not None else 999
+            dt_p1 = (row['date_dt'] - pd.to_datetime(p_dates[i_p1])).days if has_p else 999
+            dt_p2 = (row['date_dt'] - pd.to_datetime(p_dates[i_p2])).days if i_p2 is not None else 999
+            dt_n1 = (pd.to_datetime(p_dates[i_n1]) - row['date_dt']).days if has_n else 999
+            dt_n2 = (pd.to_datetime(p_dates[i_n2]) - row['date_dt']).days if i_n2 is not None else 999
             
-            y_p1 = p_known_vals[i_p1] if has_prev else np.nan
-            y_p2 = p_known_vals[i_p2] if i_p2 is not None else np.nan
-            y_n1 = p_known_vals[i_n1] if has_next else np.nan
-            y_n2 = p_known_vals[i_n2] if i_n2 is not None else np.nan
+            yp1 = p_vals[i_p1] if has_p else np.nan
+            yp2 = p_vals[i_p2] if i_p2 is not None else np.nan
+            yn1 = p_vals[i_n1] if has_n else np.nan
+            yn2 = p_vals[i_n2] if i_n2 is not None else np.nan
             
-            # Расчет линейного базиса по краям окна (y_linear) и весов близости
-            if has_prev and has_next:
-                dt_total = dt_p1 + dt_n1
-                y_linear = y_p1 + (y_n1 - y_p1) * (dt_p1 / dt_total)
-                weight_p = dt_n1 / dt_total
-                weight_n = dt_p1 / dt_total
-            elif has_prev:
-                y_linear = y_p1
-                weight_p = 1.0
-                weight_n = 0.0
-                dt_total = dt_p1
-            elif has_next:
-                y_linear = y_n1
-                weight_p = 0.0
-                weight_n = 1.0
-                dt_total = dt_n1
+            sp1 = 0 if (has_p and not np.isnan(p_s2[i_p1])) else (1 if (has_p and not np.isnan(p_ls[i_p1])) else 2)
+            sn1 = 0 if (has_n and not np.isnan(p_s2[i_n1])) else (1 if (has_n and not np.isnan(p_ls[i_n1])) else 2)
+            
+            if has_p and has_n:
+                dt_tot = dt_p1 + dt_n1
+                y_linear = yp1 + (yn1 - yp1) * (dt_p1 / dt_tot)
+                wp = dt_n1 / dt_tot
+                wn = dt_p1 / dt_tot
+            elif has_p:
+                dt_tot = dt_p1
+                y_linear = yp1
+                wp, wn = 1.0, 0.0
             else:
-                y_linear = np.nan
-                weight_p = 0.0
-                weight_n = 0.0
-                dt_total = 999
+                dt_tot = dt_n1
+                y_linear = yn1
+                wp, wn = 0.0, 1.0
                 
-            p1_is_s2 = int(not np.isnan(p_known_s2[i_p1])) if has_prev else 0
-            p1_is_mod = int(not np.isnan(p_known_mod[i_p1])) if has_prev else 0
-            n1_is_s2 = int(not np.isnan(p_known_s2[i_n1])) if has_next else 0
-            n1_is_mod = int(not np.isnan(p_known_mod[i_n1])) if has_next else 0
-            
-            evi_p1 = p_known_evi[i_p1] if has_prev else np.nan
-            evi_n1 = p_known_evi[i_n1] if has_next else np.nan
-            ndwi_p1 = p_known_ndwi[i_p1] if has_prev else np.nan
-            ndwi_n1 = p_known_ndwi[i_n1] if has_next else np.nan
-            
-            # Наклон тренда (первая производная кривой вегетации до и после пропуска)
-            slope_p = (y_p1 - y_p2) / max(1, (dt_p2 - dt_p1)) if has_prev and i_p2 != i_p1 else 0.0
-            slope_n = (y_n2 - y_n1) / max(1, (dt_n2 - dt_n1)) if has_next and i_n2 != i_n1 else 0.0
+            slope_p = (yp1 - yp2) / max(1, (dt_p2 - dt_p1)) if has_p and i_p2 != i_p1 else 0.0
+            slope_n = (yn2 - yn1) / max(1, (dt_n2 - dt_n1)) if has_n and i_n2 != i_n1 else 0.0
             
             samples.append({
                 'index': idx,
@@ -142,74 +180,126 @@ def extract_gap_features(df: pd.DataFrame, gap_indices: np.ndarray, poly_clim_df
                 'year': int(pd.to_datetime(row['date_dt']).year),
                 'crop_type': str(row['crop_type']),
                 'y_linear': y_linear,
-                'y_p1': y_p1,
-                'y_n1': y_n1,
-                'y_p2': y_p2,
-                'y_n2': y_n2,
+                'yp1': yp1,
+                'yn1': yn1,
+                'yp2': yp2,
+                'yn2': yn2,
+                'y_p1': yp1,
+                'y_n1': yn1,
+                'y_p2': yp2,
+                'y_n2': yn2,
                 'dt_p1': dt_p1,
                 'dt_n1': dt_n1,
-                'dt_total': dt_total,
+                'dt_total': dt_tot,
                 'min_dt': min(dt_p1, dt_n1),
-                'diff_pn': y_n1 - y_p1 if (has_prev and has_next) else 0.0,
-                'weight_p': weight_p,
-                'weight_n': weight_n,
+                'dt_diff': abs(dt_p1 - dt_n1),
+                'diff_pn': yn1 - yp1 if (has_p and has_n) else 0.0,
+                'w_p': wp,
+                'w_n': wn,
                 'slope_p': slope_p,
                 'slope_n': slope_n,
-                'p1_is_s2': p1_is_s2,
-                'p1_is_mod': p1_is_mod,
-                'n1_is_s2': n1_is_s2,
-                'n1_is_mod': n1_is_mod,
-                'evi_p1': evi_p1,
-                'evi_n1': evi_n1,
-                'ndwi_p1': ndwi_p1,
-                'ndwi_n1': ndwi_n1,
-                'era5_temp_interp': row.get('era5_temp_interp', np.nan),
-                'era5_precip_interp': row.get('era5_precip_interp', 0.0),
-                'precip_sum_7': row.get('precip_sum_7', 0.0),
-                'precip_sum_14': row.get('precip_sum_14', 0.0),
-                'temp_mean_7': row.get('temp_mean_7', np.nan),
+                'slope_diff': slope_n - slope_p,
+                'src_p1': sp1,
+                'src_n1': sn1,
+                'sp1': sp1,
+                'sn1': sn1,
+                'temp_interp': row.get('temp_interp', 15.0),
+                'precip_interp': row.get('precip_interp', 0.0),
+                'precip_7': row.get('precip_7', 0.0),
+                'precip_14': row.get('precip_14', 0.0),
+                'temp_7': row.get('temp_7', 15.0),
             })
             
-    res_df = pd.DataFrame(samples)
+    res = pd.DataFrame(samples)
+    if res.empty:
+        return res
+        
+    # Календарь спутников
+    if date_sat_stats is not None:
+        res = res.merge(date_sat_stats[['date', 'tot_s2', 'tot_ls', 'tot_mod', 'inferred_sensor', 'mean_obs']], on='date', how='left')
+    else:
+        res['tot_s2'] = 0
+        res['tot_ls'] = 0
+        res['tot_mod'] = 0
+        res['inferred_sensor'] = 1
+        res['mean_obs'] = np.nan
+        
+    res['tot_s2'] = res['tot_s2'].fillna(0)
+    res['tot_ls'] = res['tot_ls'].fillna(0)
+    res['tot_mod'] = res['tot_mod'].fillna(0)
+    res['inferred_sensor'] = res['inferred_sensor'].fillna(1).astype(int)
     
-    # Каскадное слияние климатологий: Полигон -> Культура -> Общемировая норма
-    res_df = res_df.merge(poly_clim_df, on=['anon_polygon_id', 'doy'], how='left')
-    res_df = res_df.merge(crop_clim_df, on=['crop_type', 'doy'], how='left')
-    res_df = res_df.merge(global_clim_df, on='doy', how='left')
+    # Нелинейное калибровочное смещение сенсоров
+    b_t = [get_sensor_bias(s, y) for s, y in zip(res['inferred_sensor'], res['y_linear'])]
+    b_p = [get_sensor_bias(s, y) for s, y in zip(res['src_p1'], res['yp1'])]
+    b_n = [get_sensor_bias(s, y) for s, y in zip(res['src_n1'], res['yn1'])]
+    res['sensor_bias_shift'] = np.array(b_t) - (res['w_p'] * np.array(b_p) + res['w_n'] * np.array(b_n))
+    res['sensor_bias_shift'] = res['sensor_bias_shift'].fillna(0.0)
     
-    res_df['clim_mean'] = res_df['clim_mean'].fillna(res_df['crop_clim_mean']).fillna(res_df['global_clim_mean']).fillna(0.35)
-    res_df['clim_std'] = res_df['clim_std'].fillna(res_df['crop_clim_std']).fillna(res_df['global_clim_std']).fillna(0.06)
+    # Калиброванный базис
+    res['y_calibrated'] = np.clip(res['y_linear'] + res['sensor_bias_shift'], -0.05, 0.98)
     
-    res_df['y_linear'] = res_df['y_linear'].fillna(res_df['clim_mean'])
-    res_df['y_p1'] = res_df['y_p1'].fillna(res_df['clim_mean'])
-    res_df['y_n1'] = res_df['y_n1'].fillna(res_df['clim_mean'])
-    res_df['y_p2'] = res_df['y_p2'].fillna(res_df['y_p1'])
-    res_df['y_n2'] = res_df['y_n2'].fillna(res_df['y_n1'])
+    # Региональные данные по культуре
+    if date_crop_stats is not None:
+        res = res.merge(date_crop_stats[['crop_type', 'date', 'crop_tot_obs', 'crop_mean_obs', 'crop_std_obs']], on=['crop_type', 'date'], how='left')
+    else:
+        res['crop_tot_obs'] = 0
+        res['crop_mean_obs'] = res['mean_obs']
+        res['crop_std_obs'] = 0.0
+        
+    res['crop_mean_obs'] = res['crop_mean_obs'].fillna(res['mean_obs'])
+    res['crop_std_obs'] = res['crop_std_obs'].fillna(0.0)
     
-    # Агроклиматические аномалии и направляющий априорный прогноз
-    res_df['y_linear_clim_diff'] = res_df['y_linear'] - res_df['clim_mean']
-    res_df['p1_clim_diff'] = res_df['y_p1'] - res_df['clim_mean']
-    res_df['n1_clim_diff'] = res_df['y_n1'] - res_df['clim_mean']
-    res_df['interp_anom'] = res_df['weight_p'] * res_df['p1_clim_diff'] + res_df['weight_n'] * res_df['n1_clim_diff']
-    res_df['clim_guided_pred'] = res_df['clim_mean'] + res_df['interp_anom']
+    # Климатология
+    res = res.merge(poly_clim_df, on=['anon_polygon_id', 'doy'], how='left')
+    res = res.merge(crop_clim_df, on=['crop_type', 'doy'], how='left')
+    res = res.merge(global_clim_df, on='doy', how='left')
     
-    # Циклические признаки дня года для учета фенологической периодичности
-    res_df['sin_doy'] = np.sin(2 * np.pi * res_df['doy'] / 365.25)
-    res_df['cos_doy'] = np.cos(2 * np.pi * res_df['doy'] / 365.25)
+    res['clim_mean'] = res['poly_clim_mean'].fillna(res['crop_clim_mean']).fillna(res['global_clim_mean']).fillna(0.35)
+    res['clim_std'] = res['poly_clim_std'].fillna(res['crop_clim_std']).fillna(res['global_clim_std']).fillna(0.06)
     
-    res_df['crop_type'] = res_df['crop_type'].astype('category')
-    res_df['anon_polygon_id'] = res_df['anon_polygon_id'].astype('category')
+    res['y_linear'] = res['y_linear'].fillna(res['clim_mean'])
+    res['yp1'] = res['yp1'].fillna(res['clim_mean'])
+    res['yn1'] = res['yn1'].fillna(res['clim_mean'])
+    res['yp2'] = res['yp2'].fillna(res['yp1'])
+    res['yn2'] = res['yn2'].fillna(res['yn1'])
+    res['y_p1'] = res['yp1']
+    res['y_n1'] = res['yn1']
+    res['y_p2'] = res['yp2']
+    res['y_n2'] = res['yn2']
+    res['y_calibrated'] = res['y_calibrated'].fillna(res['clim_mean'])
     
-    return res_df
+    if 'clim_slope' not in res.columns:
+        res['clim_slope'] = 0.0
+    res['clim_slope'] = res['clim_slope'].fillna(0.0)
+    res['taylor_curve'] = 0.5 * res['dt_p1'] * res['dt_n1'] * res['clim_slope']
+    
+    res['crop_mean_obs'] = res['crop_mean_obs'].fillna(res['clim_mean'])
+    res['clim_diff'] = res['y_linear'] - res['clim_mean']
+    res['crop_mean_diff'] = res['crop_mean_obs'] - res['clim_mean']
+    res['curvature'] = res['y_linear'] - 0.5 * (res['yp1'] + res['yn1'])
+    res['curvature_linear'] = res['curvature']
+    res['p1_clim_diff'] = res['yp1'] - res['clim_mean']
+    res['n1_clim_diff'] = res['yn1'] - res['clim_mean']
+    
+    res['y_spatial_guide'] = res['clim_mean'] + res['crop_mean_diff']
+    res['spatial_diff'] = res['y_spatial_guide'] - res['y_linear']
+    
+    # Циклическое время
+    res['sin_doy'] = np.sin(2 * np.pi * res['doy'] / 365.25)
+    res['cos_doy'] = np.cos(2 * np.pi * res['doy'] / 365.25)
+    
+    return res
 
 FEATURE_COLUMNS = [
     'doy', 'sin_doy', 'cos_doy', 'crop_type',
     'y_linear', 'y_p1', 'y_n1', 'y_p2', 'y_n2',
-    'dt_p1', 'dt_n1', 'dt_total', 'min_dt', 'diff_pn',
-    'weight_p', 'weight_n', 'slope_p', 'slope_n',
-    'p1_is_s2', 'p1_is_mod', 'n1_is_s2', 'n1_is_mod',
-    'evi_p1', 'evi_n1', 'ndwi_p1', 'ndwi_n1',
-    'era5_temp_interp', 'era5_precip_interp', 'precip_sum_7', 'precip_sum_14', 'temp_mean_7',
-    'clim_mean', 'clim_std', 'y_linear_clim_diff', 'p1_clim_diff', 'n1_clim_diff',
-    'interp_anom', 'clim_guided_pred'
+    'dt_p1', 'dt_n1', 'dt_total', 'min_dt', 'dt_diff', 'diff_pn',
+    'w_p', 'w_n', 'slope_p', 'slope_n', 'slope_diff',
+    'src_p1', 'src_n1', 'inferred_sensor', 'sensor_bias_shift',
+    'tot_s2', 'tot_ls', 'tot_mod',
+    'crop_mean_obs', 'crop_std_obs', 'crop_mean_diff',
+    'clim_mean', 'clim_std', 'clim_diff', 'clim_slope',
+    'p1_clim_diff', 'n1_clim_diff', 'curvature_linear', 'taylor_curve',
+    'temp_interp', 'precip_interp', 'precip_7', 'precip_14', 'temp_7'
 ]

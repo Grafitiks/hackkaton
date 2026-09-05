@@ -3,42 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GEO-VEGA // Космохакатон: Мониторинг вегетации с/х полей</title>
+  <title>GEO-VEGA // Мониторинг вегетации с/х полей</title>
   
-  <!-- Fonts & Icons -->
+  <!-- Шрифты и векторные иконки -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
-  <!-- Leaflet CSS & Leaflet Draw -->
+  <!-- Стили интерактивной карты Leaflet и Leaflet Draw -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
   
-  <!-- Custom Styles -->
-  <link rel="stylesheet" href="styles.css?v=20260905_modalfix">
+  <!-- Пользовательские стили оформления интерфейса -->
+  <link rel="stylesheet" href="styles.css?v=20260905_cinematic">
   
-  <!-- Chart.js & Zoom Plugin -->
+  <!-- Графическая библиотека Chart.js и плагин зумирования -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 
-  <!-- Flatpickr (Custom Cyber-Agro Calendar) -->
+  <!-- Календарь выбора дат Flatpickr с русской локализацией -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
 </head>
 <body>
 
-  <!-- Top Navigation Header -->
+  <!-- Верхняя навигационная панель управления -->
   <header class="app-header">
     <div class="header-left">
       <div class="logo-badge">
         <i class="fa-solid fa-satellite-dish"></i>
       </div>
       <div class="app-title-group">
-        <div class="app-name">GEO-VEGA <span class="tag-version">v1.0 ML</span></div>
-        <div class="app-subtitle">Космохакатон: Мониторинг вегетационной динамики и детекция аномалий</div>
+        <div class="app-name">GEO-VEGA</div>
+        <div class="app-subtitle">Мониторинг вегетационной динамики и детекция аномалий</div>
       </div>
     </div>
 
@@ -66,6 +66,9 @@
           </select>
           <button id="createGroupBtn" class="btn-icon-control" title="Создать свою группу полей (хозяйство / кластер)">
             <i class="fa-solid fa-folder-plus"></i>
+          </button>
+          <button id="editGroupBtn" class="btn-icon-control" title="Переименовать активную группу полей" disabled>
+            <i class="fa-solid fa-pen-to-square"></i>
           </button>
           <button id="deleteGroupBtn" class="btn-icon-control btn-delete-danger" title="Удалить активную группу полей" disabled>
             <i class="fa-solid fa-trash-can"></i>
@@ -117,17 +120,13 @@
         </select>
       </div>
 
-      <button id="drawModeBtn" class="btn btn-secondary">
+      <button id="drawModeBtn" class="btn btn-primary">
         <i class="fa-solid fa-draw-polygon"></i> Нарисовать контур
-      </button>
-
-      <button id="batchModalBtn" class="btn btn-primary">
-        <i class="fa-solid fa-file-arrow-down"></i> Batch-инференс
       </button>
     </div>
   </header>
 
-  <!-- KPI Metrics Banner -->
+  <!-- Информационная панель ключевых агрономических показателей (KPI) -->
   <section class="kpi-strip">
     <div class="kpi-card">
       <div class="kpi-label">Текущий статус поля</div>
@@ -172,13 +171,13 @@
     </div>
   </section>
 
-  <!-- Drawing Mode Guide Banner -->
+  <!-- Баннер-подсказка режима оцифровки границ полей -->
   <div id="drawingGuideBanner" class="drawing-guide-banner hidden">
     <span class="glow-dot"></span>
     <span><strong>Режим контурирования:</strong> Нарисуйте полигон любого аграрного поля на карте кликами мыши, замкните контур двойным кликом.</span>
   </div>
 
-  <!-- Cursor Tooltip & Toast Alert -->
+  <!-- Всплывающие уведомления и интерактивные подсказки курсора -->
   <div id="cursorGeoTooltip" class="cursor-geo-tooltip hidden">
     <i class="fa-solid fa-satellite"></i> <span>Глобальное покрытие GEE активно</span>
   </div>
@@ -187,9 +186,9 @@
     <span id="toastMsg">Сообщение</span>
   </div>
 
-  <!-- Main Split Content: Map & Analytics -->
+  <!-- Основная двухколоночная рабочая область: Карта и Аналитика -->
   <main class="main-layout">
-    <!-- Left Column: Map -->
+    <!-- Левая колонка: Интерактивная карта геомониторинга -->
     <section class="map-column">
       <div class="panel-header">
         <div class="panel-title"><i class="fa-solid fa-earth-americas"></i> Геопространственный мониторинг (AOI)</div>
@@ -205,7 +204,7 @@
         </div>
       </div>
 
-      <!-- Floating Draw Control Bar -->
+      <!-- Плавающая панель инструментов рисования и редактирования полей -->
       <div id="drawToolbar" class="draw-floating-toolbar hidden">
         <div class="draw-toolbar-left">
           <span class="draw-badge points"><i class="fa-solid fa-draw-polygon"></i> Точек: <strong id="drawPointsCount">0</strong></span>
@@ -235,9 +234,9 @@
       </div>
     </section>
 
-    <!-- Right Column: Analytics & Charts -->
+    <!-- Правая колонка: Аналитические панели и графики -->
     <section class="analytics-column">
-      <!-- Loading Overlay -->
+      <!-- Индикатор загрузки данных -->
       <div id="analyticsLoader" class="analytics-loading-overlay hidden">
         <div class="loader-card">
           <div class="satellite-orbit-loader">
@@ -253,7 +252,7 @@
         </div>
       </div>
 
-      <!-- Data Source Attribution Panel -->
+      <!-- Панель статуса и источников данных (Sentinel-2, Landsat, MODIS, ERA5) -->
       <div id="dataSourceCard" class="panel data-source-panel">
         <div class="panel-header ds-header">
           <div class="panel-title ds-title">
@@ -281,7 +280,7 @@
         </div>
       </div>
 
-      <!-- NDVI Timeseries Chart Panel -->
+      <!-- Аналитический график временного ряда NDVI и прогнозов модели -->
       <div class="panel chart-panel">
         <div class="panel-header chart-panel-header">
           <div class="panel-title-group">
@@ -318,7 +317,7 @@
         </div>
       </div>
 
-      <!-- Weather Reanalysis Chart Panel -->
+      <!-- График агрометеорологических параметров (температура, осадки, влажность почвы) -->
       <div class="panel chart-panel weather-panel">
         <div class="panel-header chart-panel-header">
           <div class="panel-title-group">
@@ -338,7 +337,7 @@
         </div>
       </div>
 
-      <!-- Anomalies & Agronomic Diagnostics Panel -->
+      <!-- Панель агрономической диагностики и классификации аномалий -->
       <div class="panel anomalies-panel">
         <div class="panel-header anomalies-panel-header">
           <div class="panel-title">
@@ -358,51 +357,7 @@
     </section>
   </main>
 
-  <!-- Modal for Batch Inference (submission.csv) -->
-  <div id="batchModal" class="modal-backdrop hidden">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title"><i class="fa-solid fa-bolt"></i> Batch-инференс & Submission (Задача 1)</div>
-        <button id="closeModalBtn" class="btn-icon"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-      <div class="modal-body">
-        <p class="modal-description">
-          Автоматическое восстановление скрытых контрольных пропусков <code>is_synthetic_gap = True</code> на основе ансамбля <strong>LightGBM + CatBoost</strong> с учетом трансдуктивной климатологии, bi-directional лагов и метеоданных ERA5.
-        </p>
-
-        <div class="batch-status-box">
-          <div class="status-row">
-            <span>Статус готовности сабмита:</span>
-            <strong id="batchStatusText" class="text-green">Готов</strong>
-          </div>
-          <div class="status-row">
-            <span>Количество предсказанных строк:</span>
-            <strong id="batchRowCount">3 112 строк</strong>
-          </div>
-          <div class="status-row">
-            <span>Уникальных полигонов (AOI):</span>
-            <strong id="batchPolyCount">78 полигонов</strong>
-          </div>
-          <div class="status-row">
-            <span>Средний предсказанный NDVI:</span>
-            <strong id="batchMeanNdvi">--</strong>
-          </div>
-          <div class="status-row">
-            <span>Формат файла:</span>
-            <code>anon_polygon_id,date,primary_ndvi_pred</code>
-          </div>
-        </div>
-
-        <div class="modal-actions">
-          <a id="downloadSubBtn" href="/api/download-submission" class="btn btn-primary btn-large">
-            <i class="fa-solid fa-download"></i> Скачать submission.csv
-          </a>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal for Custom Field Naming & Color Styling -->
+  <!-- Модальное окно настройки названия, цвета и атрибутов поля -->
   <div id="fieldModal" class="modal-backdrop hidden">
     <div class="modal-card" style="width: 450px;">
       <div class="modal-header">
@@ -455,7 +410,7 @@
     </div>
   </div>
 
-  <!-- Modal for Field Passport & Executive Agronomic Report -->
+  <!-- Модальное окно официального паспорта поля и агрономического отчета -->
   <div id="passportModal" class="modal-backdrop hidden">
     <div class="modal-card passport-modal-card">
       <div class="modal-header passport-modal-header">
@@ -478,9 +433,9 @@
       </div>
 
       <div class="modal-body passport-modal-body">
-        <!-- Printable Document Canvas -->
+        <!-- Область документа, подготовленная для печати и экспорта -->
         <div id="passportPrintDoc" class="passport-document">
-          <!-- Document Header -->
+          <!-- Фирменная шапка официального заключения -->
           <div class="doc-official-header">
             <div class="doc-header-brand">
               <div class="doc-logo-box">
@@ -500,7 +455,7 @@
             </div>
           </div>
 
-          <!-- Section 1: Field Passport Metadata Grid -->
+          <!-- Раздел 1: Паспортные характеристики и метаданные контура поля -->
           <div class="doc-section">
             <div class="doc-section-title"><i class="fa-solid fa-map-location-dot"></i> 1. Учетные параметры земельного участка (AOI)</div>
             <div class="doc-meta-grid">
@@ -539,7 +494,7 @@
             </div>
           </div>
 
-          <!-- Section 2: Vegetation Timeseries Graphic -->
+          <!-- Раздел 2: График вегетационной динамики и прогнозов восстановления -->
           <div class="doc-section">
             <div class="doc-section-title"><i class="fa-solid fa-chart-line"></i> 2. Профиль вегетационной динамики (NDVI) и климатический коридор нормы</div>
             <div class="doc-chart-container">
@@ -554,23 +509,23 @@
             </div>
           </div>
 
-          <!-- Section 3: Anomaly Register Table -->
+          <!-- Раздел 3: Реестр зафиксированных стрессов и аномалий вегетации -->
           <div class="doc-section">
             <div class="doc-section-title"><i class="fa-solid fa-triangle-exclamation"></i> 3. Реестр выявленных агроэкологических аномалий и угнетений</div>
             <div id="docAnomaliesContainer">
-              <!-- Dynamically rendered table -->
+              <!-- Динамически формируемая таблица аномалий -->
             </div>
           </div>
 
-          <!-- Section 4: Actionable Directives & Agronomic Recommendations -->
+          <!-- Раздел 4: Агрономические рекомендации и директивы агроному -->
           <div class="doc-section">
             <div class="doc-section-title"><i class="fa-solid fa-clipboard-check"></i> 4. Директивный план агротехнических мероприятий (Предписания агроному)</div>
             <div id="docDirectivesContainer" class="doc-directives-list">
-              <!-- Dynamically populated recommendations -->
+              <!-- Динамически генерируемый список рекомендаций -->
             </div>
           </div>
 
-          <!-- Section 5: Signature & Official Verification Seal -->
+          <!-- Раздел 5: Блок подписи эксперта и оттиск печати системы -->
           <div class="doc-section doc-signature-section">
             <div class="doc-seal-box">
               <div class="seal-circle">
@@ -598,7 +553,7 @@
     </div>
   </div>
 
-  <!-- Regional Summary & Agrometeorology Modal -->
+  <!-- Модальное окно региональной агрометеорологической сводки -->
   <div id="regionSummaryModal" class="modal-backdrop hidden">
     <div class="modal-card region-summary-modal-card">
       <div class="modal-header">
@@ -662,7 +617,7 @@
     </div>
   </div>
 
-  <!-- Custom Region Geocoder Search Modal -->
+  <!-- Модальное окно геопоиска районов и субъектов РФ -->
   <div id="customRegionModal" class="modal-backdrop hidden">
     <div class="modal-card custom-region-modal-card">
       <div class="modal-header">
@@ -680,23 +635,23 @@
           </button>
         </div>
         <div id="geocodeResultsList" class="geocode-results-list" style="margin-top: 14px; max-height: 220px; overflow-y: auto;">
-          <!-- Dynamically inserted search results -->
+          <!-- Динамически формируемый список результатов поиска -->
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Modal for Creating a Custom Field Group in Region Category -->
+  <!-- Модальное окно создания и редактирования пользовательской группы полей -->
   <div id="groupModal" class="modal-backdrop hidden">
     <div class="modal-card" style="max-width: 480px; width: 90%;">
       <div class="modal-header">
-        <div class="modal-title">
+        <div class="modal-title" id="groupModalTitle">
           <i class="fa-solid fa-folder-plus text-cyan"></i> <span>Создать группу полей</span>
         </div>
         <button id="closeGroupModalBtn" class="btn-close">&times;</button>
       </div>
       <div class="modal-body">
-        <p class="modal-desc" style="color: var(--text-secondary); margin-bottom: 14px; font-size: 13px;">
+        <p id="groupModalDescText" class="modal-desc" style="color: var(--text-secondary); margin-bottom: 14px; font-size: 13px;">
           Созданная группа полей появится в категории <strong>«Группы»</strong>. Вы сможете объединить свои поля (по хозяйству, севообороту или кластеру) и переключаться между ними:
         </p>
         <div class="form-group-modal" style="margin-bottom: 14px;">
@@ -709,17 +664,88 @@
         </div>
         <div class="modal-actions" style="margin-top: 18px; display: flex; justify-content: flex-end; gap: 10px;">
           <button id="cancelGroupModalBtn" class="btn btn-secondary">Отмена</button>
-          <button id="saveGroupModalBtn" class="btn btn-primary"><i class="fa-solid fa-check"></i> Создать группу</button>
+          <button id="saveGroupModalBtn" class="btn btn-primary"><i class="fa-solid fa-check"></i> <span id="saveGroupModalBtnText">Создать группу</span></button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Leaflet JS & Leaflet Draw -->
+  <!-- Модальное окно добавления найденного поля OSM в группу -->
+  <div id="osmFieldModal" class="modal-backdrop hidden">
+    <div class="modal-card" style="max-width: 490px; width: 92%;">
+      <div class="modal-header">
+        <div class="modal-title" id="osmFieldModalTitle">
+          <i class="fa-solid fa-folder-plus text-cyan"></i> <span>Добавить поле в группу</span>
+        </div>
+        <button id="closeOsmFieldModalBtn" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc" style="color: var(--text-secondary); margin-bottom: 12px; font-size: 13px;">
+          Сохранение контура поля в группу. Укажите название поля и выберите папку:
+        </p>
+
+        <!-- Обязательное поле ввода названия поля (в начале формы) -->
+        <div class="form-group-modal" style="margin-bottom: 14px;">
+          <label class="modal-label" for="osmCustomFieldNameInput" style="display: flex; align-items: center; justify-content: space-between; font-weight: 600; margin-bottom: 6px;">
+            <span><i class="fa-solid fa-pen-to-square text-cyan"></i> Название поля: <span style="color: #ef4444;">*</span></span>
+            <span style="font-size: 11px; color: #ef4444; font-weight: normal;">обязательно для заполнения</span>
+          </label>
+          <input type="text" id="osmCustomFieldNameInput" class="modal-input" placeholder="Введите название поля (обязательно)" maxlength="60" style="width: 100%; box-sizing: border-box;" autocomplete="off" required>
+        </div>
+
+        <div class="field-info-preview" style="margin-bottom: 14px; background: rgba(255, 255, 255, 0.04); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color);">
+          <div class="info-preview-row">
+            <span>Площадь контура:</span>
+            <strong id="osmModalFieldArea">-- га</strong>
+          </div>
+          <div class="info-preview-row">
+            <span>Культура:</span>
+            <strong id="osmModalFieldCrop">зерновые</strong>
+          </div>
+          <div class="info-preview-row">
+            <span>Контур OSM:</span>
+            <span id="osmModalFieldName" style="color: var(--text-secondary); font-size: 12px;">Поле OSM</span>
+          </div>
+        </div>
+
+        <div class="form-group-modal" style="margin-bottom: 14px;">
+          <label class="modal-label"><i class="fa-solid fa-list-check"></i> Выберите действие:</label>
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
+            <!-- Вариант 1: Добавить в существующую группу -->
+            <label id="osmGroupExistingOptionWrap" style="display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 13.5px; color: var(--text-primary);">
+              <input type="radio" name="osmGroupAction" id="osmActionExisting" value="existing" checked style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+              <span>Добавить в существующую группу</span>
+            </label>
+            <div id="osmExistingGroupSelectWrap" style="margin-left: 25px;">
+              <select id="osmExistingGroupSelect" class="form-select" style="width: 100%; background: #0f1624; border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px 12px; border-radius: 6px;">
+                <!-- Список существующих групп формируется динамически -->
+              </select>
+            </div>
+
+            <!-- Вариант 2: Создать новую папку с этим полем -->
+            <label id="osmGroupNewOptionWrap" style="display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 13.5px; color: var(--text-primary);">
+              <input type="radio" name="osmGroupAction" id="osmActionNew" value="new" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+              <span>Создать новую папку с этим полем</span>
+            </label>
+            <div id="osmNewGroupInputWrap" style="margin-left: 25px; display: none;">
+              <input type="text" id="osmNewGroupNameInput" class="modal-input" placeholder="Введите название новой папки (например: Мои поля, КФХ Заря)" maxlength="50" style="width: 100%; box-sizing: border-box;">
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 18px; display: flex; justify-content: flex-end; gap: 10px;">
+          <button id="cancelOsmFieldModalBtn" class="btn btn-secondary">Отмена</button>
+          <button id="confirmOsmFieldModalBtn" class="btn btn-primary"><i class="fa-solid fa-check"></i> Сохранить в группу</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Подключение скриптов интерактивной картографии Leaflet и инструментов рисования -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
   
-  <!-- Main Application Script -->
-  <script src="app.js?v=20260905_customgroups"></script>
+  <!-- Основной клиентский сценарий веб-интерфейса -->
+  <script src="app.js?v=20260905_drawprimary"></script>
 </body>
 </html>

@@ -8,12 +8,12 @@ df = pd.read_csv("data/train_dataset.csv", encoding='utf-8')
 print("Non-null climatology in train:", df['ndvi_climatology_mean'].notna().sum())
 print("Null climatology in train:", df['ndvi_climatology_mean'].isna().sum())
 
-# In train, when is ndvi_climatology_mean non-null?
+# Анализ заполненности ndvi_climatology_mean в обучающем датасете
 print("When primary_ndvi is notna, climatology is notna:", df[df['primary_ndvi'].notna()]['ndvi_climatology_mean'].notna().sum())
 print("When primary_ndvi is isna, climatology is notna:", df[df['primary_ndvi'].isna()]['ndvi_climatology_mean'].notna().sum())
 
-# How is ndvi_climatology_mean related to doy and anon_polygon_id?
-# Is it smooth? Does it vary by year or only by doy and polygon?
+# Связь ndvi_climatology_mean с днем года (DOY) и идентификатором полигона
+# Проверка гладкости климатологии и межгодовой вариативности
 p2 = df[df['anon_polygon_id'] == 'AOI-0002']
 p2_notna = p2[p2['ndvi_climatology_mean'].notna()]
 print("\nAOI-0002 unique years:", p2_notna['year'].unique())

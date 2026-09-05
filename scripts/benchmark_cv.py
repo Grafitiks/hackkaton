@@ -7,25 +7,25 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 print("=== BENCHMARKING RECONSTRUCTION METHODS ===")
 
-# Load train dataset
+# Загрузка обучающего датасета
 df_train = pd.read_csv("data/train_dataset.csv", encoding='utf-8')
 df_train['date_dt'] = pd.to_datetime(df_train['date'])
 df_train = df_train.sort_values(['anon_polygon_id', 'date_dt']).reset_index(drop=True)
 
-# Select all known primary_ndvi indices
+# Индексы известных значений primary_ndvi
 known_idx = df_train[df_train['primary_ndvi'].notna()].index.values
 print(f"Total known primary_ndvi points in train: {len(known_idx)}")
 
-# Set random seed
+# Установка случайного зерна
 np.random.seed(42)
 
-# Create a validation mask mimicking test:
-# In test, ~3112 / 20753 ~ 15% of all observation points were selected as synthetic gaps.
-# Mostly length 1, occasionally length 2.
-# Let's sample ~15% of known indices as validation synthetic gaps.
+# Создание маски валидации, имитирующей тест:
+# В тесте ~15% точек наблюдений выбраны как синтетические пропуски
+# Преимущественно длины 1, реже длины 2
+# Сэмплируем ~15% известных индексов
 val_mask = np.zeros(len(df_train), dtype=bool)
 
-# Sample 4500 points from known_idx
+# Сэмплирование 4500 точек из известных наблюдений
 sampled_val_idx = np.random.choice(known_idx, size=4500, replace=False)
 val_mask[sampled_val_idx] = True
 
@@ -39,12 +39,12 @@ def calc_metrics(y_t, y_p, name="Method"):
     print(f"{name:30s} | RMSE: {rmse:.5f} | GapScore: {gap_score:5.2f} / 30 | MAE: {mae:.5f}")
     return rmse, gap_score
 
-# 1. Linear interpolation on the time series of each polygon
-# For validation, we mask out the sampled_val_idx
+# 1. Линейная интерполяция временных рядов каждого полигона
+# Для валидации маскируем выбранные контрольные точки
 df_sim = df_train[['anon_polygon_id', 'date_dt', 'primary_ndvi']].copy()
 df_sim.loc[val_mask, 'primary_ndvi'] = np.nan
 
-# Linear interpolation by polygon
+# Линейная интерполяция по полигону
 df_sim['ndvi_linear'] = df_sim.groupby('anon_polygon_id')['primary_ndvi'].transform(
     lambda s: s.interpolate(method='linear', limit_direction='both')
 )
@@ -52,22 +52,20 @@ df_sim['ndvi_linear'] = df_sim.groupby('anon_polygon_id')['primary_ndvi'].transf
 y_pred_linear = df_sim.loc[val_mask, 'ndvi_linear'].values
 calc_metrics(y_true, y_pred_linear, "Linear Interpolation (all-time)")
 
-# Linear interpolation WITHIN each polygon & YEAR (season)
-# Since winter is not in the data, interpolating across October 30 -> April 01 could be dangerous
+# Линейная интерполяция ВНУТРИ полигона и ГОДА (сезона)
+# Интерполяция через зиму (октябрь -> апрель) нежелательна
 df_sim['year'] = df_sim['date_dt'].dt.year
 df_sim['ndvi_linear_seasonal'] = df_sim.groupby(['anon_polygon_id', 'year'])['primary_ndvi'].transform(
     lambda s: s.interpolate(method='linear', limit_direction='both')
 )
-# If edges within year are nan, fallback to all-time linear
+# При отсутствии значений на краях сезона используем базовую линейную интерполяцию
 mask_nan = df_sim['ndvi_linear_seasonal'].isna()
 df_sim.loc[mask_nan, 'ndvi_linear_seasonal'] = df_sim.loc[mask_nan, 'ndvi_linear']
 
 y_pred_linear_seas = df_sim.loc[val_mask, 'ndvi_linear_seasonal'].values
 calc_metrics(y_true, y_pred_linear_seas, "Linear Interpolation (seasonal)")
 
-# Time-weighted interpolation (exact days)
-# Since the grid is daily, time-weighted is identical to linear on daily index.
-# Let's test PCHIP / Akima / Spline
+# Сравнение сплайнов: PCHIP / Akima
 pchip_preds = []
 akima_preds = []
 
@@ -76,18 +74,18 @@ for (poly, yr), group in df_sim.groupby(['anon_polygon_id', 'year']):
     if not val_in_group.any():
         continue
     
-    # known in group
+    # Известные точки в группе
     known_in_group = group[group['primary_ndvi'].notna()]
     if len(known_in_group) >= 4:
         x_kn = (known_in_group['date_dt'] - pd.to_datetime(f"{yr}-01-01")).dt.days.values
         y_kn = known_in_group['primary_ndvi'].values
         
-        # PCHIP
+        # Монотонный сплайн PCHIP
         pchip = PchipInterpolator(x_kn, y_kn, extrapolate=False)
         x_all = (group['date_dt'] - pd.to_datetime(f"{yr}-01-01")).dt.days.values
         df_sim.loc[group.index, 'ndvi_pchip'] = pchip(x_all)
         
-        # Akima
+        # Сплайн Akima
         try:
             akima = Akima1DInterpolator(x_kn, y_kn)
             df_sim.loc[group.index, 'ndvi_akima'] = akima(x_all)
@@ -97,7 +95,7 @@ for (poly, yr), group in df_sim.groupby(['anon_polygon_id', 'year']):
         df_sim.loc[group.index, 'ndvi_pchip'] = np.nan
         df_sim.loc[group.index, 'ndvi_akima'] = np.nan
 
-# Fallback for pchip and akima to linear
+# Резервное заполнение линейной интерполяцией для сплайнов
 df_sim['ndvi_pchip'] = df_sim['ndvi_pchip'].fillna(df_sim['ndvi_linear_seasonal'])
 df_sim['ndvi_akima'] = df_sim['ndvi_akima'].fillna(df_sim['ndvi_linear_seasonal'])
 

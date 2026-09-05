@@ -9,22 +9,22 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 print("=== ADVANCED FEATURE ENGINEERING & RECONSTRUCTION ===")
 
-# 1. Load Train Dataset
+# 1. Загрузка обучающего датасета
 df_train = pd.read_csv("data/train_dataset.csv", encoding='utf-8')
 df_train['date_dt'] = pd.to_datetime(df_train['date'])
 df_train['year'] = df_train['date_dt'].dt.year
 df_train = df_train.sort_values(['anon_polygon_id', 'date_dt']).reset_index(drop=True)
 
-# 2. Extract Weather Features across the continuous daily grid
-# Temperature and precipitation are mostly continuous
-# Forward/backward fill small missing weather
+# 2. Извлечение признаков погоды по непрерывной суточной сетке
+# Показатели температуры и осадков непрерывны во времени
+# Заполнение редких пропусков интерполяцией
 df_train['era5_temp_interp'] = df_train.groupby('anon_polygon_id')['era5_temp_c'].transform(
     lambda s: s.interpolate(method='linear', limit_direction='both')
 )
 df_train['era5_precip_interp'] = df_train.groupby('anon_polygon_id')['era5_precip_mm'].transform(
     lambda s: s.fillna(0.0)
 )
-# Rolling weather
+# Скользящие агрегаты метеоданных
 df_train['precip_sum_7'] = df_train.groupby('anon_polygon_id')['era5_precip_interp'].transform(
     lambda s: s.rolling(7, min_periods=1).sum()
 )
@@ -35,24 +35,24 @@ df_train['temp_mean_7'] = df_train.groupby('anon_polygon_id')['era5_temp_interp'
     lambda s: s.rolling(7, min_periods=1).mean()
 )
 
-# 3. Build Polygon DOY climatology from train observations
+# 3. Построение климатологии по дням года (DOY) для полигонов
 clim_doy = df_train[df_train['primary_ndvi'].notna()].groupby(['anon_polygon_id', 'doy'])['primary_ndvi'].agg(
     clim_mean='mean', clim_std='std', clim_median='median'
 ).reset_index()
 
-# Also crop_type DOY climatology (crucial for new polygons in test!)
+# Климатология по культуре и дням года (важно для новых тестовых полигонов)
 clim_crop_doy = df_train[df_train['primary_ndvi'].notna()].groupby(['crop_type', 'doy'])['primary_ndvi'].agg(
     crop_clim_mean='mean', crop_clim_std='std', crop_clim_median='median'
 ).reset_index()
 
-# Overall DOY climatology (fallback)
+# Общая глобальная климатология по дням года (резервная)
 clim_global_doy = df_train[df_train['primary_ndvi'].notna()].groupby('doy')['primary_ndvi'].agg(
     global_clim_mean='mean', global_clim_std='std'
 ).reset_index()
 
 print("Climatology tables constructed successfully.")
 
-# Function to build gap dataset for any series
+# Функция построения обучающей выборки для пропусков
 def create_gap_samples(df, gap_indices):
     """
     Given dataframe and indices of gaps to predict,
@@ -61,11 +61,11 @@ def create_gap_samples(df, gap_indices):
     df_work = df.copy()
     df_work.loc[gap_indices, 'primary_ndvi'] = np.nan
     
-    # Identify known observations
+    # Определение известных наблюдений
     known = df_work[df_work['primary_ndvi'].notna()].copy()
     
     samples = []
-    # Process polygon by polygon for speed
+    # Обработка полигон за полигоном для оптимизации скорости
     for poly_id, p_df in df_work.groupby('anon_polygon_id'):
         p_gaps = p_df[p_df.index.isin(gap_indices)]
         if p_gaps.empty:
@@ -86,11 +86,11 @@ def create_gap_samples(df, gap_indices):
         for idx, row in p_gaps.iterrows():
             t = np.datetime64(row['date_dt'])
             
-            # Find previous and next known points
+            # Поиск предшествующих и последующих известных точек
             prev_idx = np.where(p_known_dates < t)[0]
             next_idx = np.where(p_known_dates > t)[0]
             
-            # Prev 1 & 2
+            # Соседние точки 1 и 2
             has_prev = len(prev_idx) > 0
             has_next = len(next_idx) > 0
             
@@ -110,7 +110,7 @@ def create_gap_samples(df, gap_indices):
             y_n1 = p_known_vals[i_n1] if has_next else np.nan
             y_n2 = p_known_vals[i_n2] if i_n2 is not None else np.nan
             
-            # Linear interpolation
+            # Линейная интерполяция
             if has_prev and has_next:
                 dt_total = dt_p1 + dt_n1
                 y_linear = y_p1 + (y_n1 - y_p1) * (dt_p1 / dt_total)
@@ -132,7 +132,7 @@ def create_gap_samples(df, gap_indices):
                 weight_n = 0.0
                 dt_total = 999
                 
-            # Sensor indicators
+            # Индикаторы спутниковых сенсоров
             p1_is_s2 = int(not np.isnan(p_known_s2[i_p1])) if has_prev else 0
             p1_is_mod = int(not np.isnan(p_known_mod[i_p1])) if has_prev else 0
             n1_is_s2 = int(not np.isnan(p_known_s2[i_n1])) if has_next else 0
@@ -143,7 +143,7 @@ def create_gap_samples(df, gap_indices):
             ndwi_p1 = p_known_ndwi[i_p1] if has_prev else np.nan
             ndwi_n1 = p_known_ndwi[i_n1] if has_next else np.nan
             
-            # Slopes
+            # Наклоны динамики
             slope_p = (y_p1 - y_p2) / max(1, (dt_p2 - dt_p1)) if has_prev and i_p2 != i_p1 else 0.0
             slope_n = (y_n2 - y_n1) / max(1, (dt_n2 - dt_n1)) if has_next and i_n2 != i_n1 else 0.0
             
@@ -185,30 +185,30 @@ def create_gap_samples(df, gap_indices):
             
     res_df = pd.DataFrame(samples)
     
-    # Merge climatologies
+    # Объединение с климатологией
     res_df = res_df.merge(clim_doy, on=['anon_polygon_id', 'doy'], how='left')
     res_df = res_df.merge(clim_crop_doy, on=['crop_type', 'doy'], how='left')
     res_df = res_df.merge(clim_global_doy, on='doy', how='left')
     
-    # Fill fallback climatology
+    # Резервное заполнение пропущенных норм
     res_df['clim_mean'] = res_df['clim_mean'].fillna(res_df['crop_clim_mean']).fillna(res_df['global_clim_mean'])
     res_df['clim_std'] = res_df['clim_std'].fillna(res_df['crop_clim_std']).fillna(res_df['global_clim_std'])
     
-    # Climatology deviation features
+    # Признаки отклонения от нормы
     res_df['y_linear_clim_diff'] = res_df['y_linear'] - res_df['clim_mean']
     res_df['p1_clim_diff'] = res_df['y_p1'] - res_df['clim_mean']
     res_df['n1_clim_diff'] = res_df['y_n1'] - res_df['clim_mean']
     
-    # Climatology interpolated anomaly
-    # If we interpolate the anomaly from p1 and n1:
+    # Интерполированная аномалия относительно нормы
+    # Интерполяция отклонения от p1 и n1:
     res_df['interp_anom'] = res_df['weight_p'] * res_df['p1_clim_diff'] + res_df['weight_n'] * res_df['n1_clim_diff']
     res_df['clim_guided_pred'] = res_df['clim_mean'] + res_df['interp_anom']
     
-    # Cyclic calendar features
+    # Циклические признаки календаря (sin/cos дня года)
     res_df['sin_doy'] = np.sin(2 * np.pi * res_df['doy'] / 365.25)
     res_df['cos_doy'] = np.cos(2 * np.pi * res_df['doy'] / 365.25)
     
-    # Categorical
+    # Категориальные переменные
     res_df['crop_type'] = res_df['crop_type'].astype('category')
     res_df['anon_polygon_id'] = res_df['anon_polygon_id'].astype('category')
     
@@ -216,31 +216,30 @@ def create_gap_samples(df, gap_indices):
 
 print("Feature extractor defined.")
 
-# 4. Simulation Validation
-# Sample synthetic gaps matching the distribution of test (consecutive 1s, occasional 2s)
+# 4. Валидация моделирования пропусков
+# Сэмплирование синтетических пропусков по распределению теста
 np.random.seed(42)
 all_known_idx = df_train[df_train['primary_ndvi'].notna()].index.values
 
-# Select 3500 points for validation
+# Выборка 3500 контрольных точек для валидации
 val_idx = np.random.choice(all_known_idx, size=3500, replace=False)
 val_features = create_gap_samples(df_train, val_idx)
 val_features = val_features.sort_values('index').reset_index(drop=True)
 y_val_true = df_train.loc[val_features['index'], 'primary_ndvi'].values
 
-# Check Linear Baseline on this validation set
+# Оценка базовой линейной интерполяции на валидации
 y_val_linear = val_features['y_linear'].values
 rmse_lin = np.sqrt(mean_squared_error(y_val_true, y_val_linear))
 gap_lin = round(float(30 * max(0, 1 - rmse_lin / 0.1)), 2)
 print(f"\n[Baseline Linear]      RMSE: {rmse_lin:.5f} | GapScore: {gap_lin:5.2f} / 30")
 
-# Check Climatology Guided on this validation set
+# Оценка климатологически направленной интерполяции
 y_val_clim = pd.Series(val_features['clim_guided_pred'].values).fillna(pd.Series(y_val_linear)).values
 rmse_clim = np.sqrt(mean_squared_error(y_val_true, y_val_clim))
 gap_clim = round(float(30 * max(0, 1 - rmse_clim / 0.1)), 2)
 print(f"[Climatology-Guided]   RMSE: {rmse_clim:.5f} | GapScore: {gap_clim:5.2f} / 30")
 
-# Now create TRAINING gap samples to train LightGBM!
-# We can sample 12,000 points from remaining known points
+# Формирование обучающей выборки для LightGBM (12 000 точек)
 train_candidate_idx = np.setdiff1d(all_known_idx, val_idx)
 train_sampled_idx = np.random.choice(train_candidate_idx, size=12000, replace=False)
 
@@ -268,7 +267,7 @@ y_val_linear = val_features['y_linear'].values
 
 X_tr = train_features[feature_cols]
 y_tr = y_train_true
-# Predict residual delta = y_true - y_linear
+# Предсказание остатка (дельта) delta = y_true - y_linear
 delta_tr = y_tr - train_features['y_linear'].values
 
 X_va = val_features[feature_cols]
@@ -300,7 +299,7 @@ model = lgb.train(
 
 delta_pred = model.predict(X_va)
 y_pred_lgb = y_val_linear + delta_pred
-# Clip to physical NDVI range [-0.2, 1.0]
+# Ограничение физическим диапазоном NDVI [-0.2, 1.0]
 y_pred_lgb = np.clip(y_pred_lgb, -0.2, 1.0)
 
 rmse_lgb = np.sqrt(mean_squared_error(y_val_true, y_pred_lgb))
@@ -309,7 +308,7 @@ print(f"\n=======================================================")
 print(f"[LightGBM Residual Model] RMSE: {rmse_lgb:.5f} | GapScore: {gap_lgb:5.2f} / 30")
 print(f"=======================================================")
 
-# Feature importances
+# Важность признаков модели
 imp = pd.Series(model.feature_importance(importance_type='gain'), index=feature_cols).sort_values(ascending=False)
 print("\nTop 15 Most Important Features:")
 print(imp.head(15))

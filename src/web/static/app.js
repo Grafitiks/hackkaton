@@ -1,14 +1,21 @@
-// GEO-VEGA // Kosmohackathon Vegetation Dynamics & Anomaly Detection Dashboard
+// GEO-VEGA // Панель мониторинга вегетационной динамики и детекции аномалий (Космохакатон)
 
 let map, drawnItems, drawControl, activeDrawHandler = null;
 let esriSatelliteLayer, osmLayer;
 let osmFieldLayers = {};
-let userSavedFields = {}; // Dictionary of custom fields: id -> { id, name, color, geojson, areaHa, centerLat, centerLon, layer, data }
-let customFieldGroups = {}; // Dictionary of custom field groups: groupId -> { id, name, desc, createdAt, fields: {} }
-let activeGroupId = null; // Currently selected custom group id or null
+let osmFieldsData = {}; // Словарь найденных на карте контуров OSM: polyId -> { id, name, geojson, areaHa, centerLat, centerLon, layer, isOsm: true }
+let userSavedFields = {}; // Словарь полей текущей группы: id -> { id, name, color, geojson, areaHa, centerLat, centerLon, layer, data }
+let customFieldGroups = {}; // Словарь групп полей: groupId -> { id, name, desc, createdAt, fields: {} }
+let activeGroupId = null; // Идентификатор текущей выбранной группы полей или null
 let selectedStartDate = "01.01.2026";
 let selectedEndDate = "05.09.2026";
 let fieldCounter = 1;
+
+// Получение активного объекта поля (из полей группы или из найденных контуров OSM)
+function getActiveFieldObject() {
+  if (!selectedFieldId) return null;
+  return userSavedFields[selectedFieldId] || osmFieldsData[selectedFieldId] || null;
+}
 
 // ============================================================================
 // УТИЛИТЫ ФОРМАТИРОВАНИЯ ДАТ (ДД.ММ.ГГГГ <-> ГГГГ-ММ-ДД ISO)
@@ -44,7 +51,7 @@ let currentActiveAnalysis = null; // Хранит последнее выпол�
 let isSyncingScales = false;
 let isDrawingActive = false;
 
-// Register Chart.js Zoom plugin if available
+// Регистрация плагина масштабирования Chart.js при наличии
 if (typeof Chart !== 'undefined') {
   try {
     if (typeof ChartZoom !== 'undefined') {
@@ -57,11 +64,11 @@ if (typeof Chart !== 'undefined') {
   }
 }
 
-// Modal state for custom field naming and color picker
+// Состояние модального окна настройки имени и цвета поля
 let currentModalContext = null;
 let currentModalColor = "#00f0ff";
 
-// Google Earth Engine (COPERNICUS/S2_SR_HARMONIZED) & ERA5 cover the entire globe.
+// Google Earth Engine (COPERNICUS/S2_SR_HARMONIZED) и ERA5 обеспечивают глобальное покрытие
 function isInsideAgroZone(lat, lon) {
   return lat >= -60.0 && lat <= 85.0 && lon >= -180.0 && lon <= 180.0;
 }
@@ -74,21 +81,21 @@ document.addEventListener("DOMContentLoaded", () => {
   initRegionsModule();
   initFieldModal();
   initGroupModal();
+  initOsmFieldModal();
   loadGroupsFromStorage();
   initPassportModal();
-  loadBatchStatus();
 });
 
-// 1. Map Initialization
+// 1. Инициализация интерактивной карты Leaflet
 function initMap() {
-  // Center map on the rich agricultural heartland of Samara / Volga region
+  // Центрирование карты на ключевом аграрном регионе Поволжья (Самарская область)
   map = L.map("map", {
     center: [53.25, 50.25],
     zoom: 10,
     zoomControl: true
   });
 
-  // Base Layers
+  // Базовые картографические слои (спутниковый ESRI и картосхема OSM)
   esriSatelliteLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     attribution: "Tiles &copy; Esri, Maxar, Earthstar Geographics",
     maxZoom: 18
@@ -99,11 +106,11 @@ function initMap() {
     maxZoom: 19
   });
 
-  // Drawn items layer
+  // Слой для отрисованных пользователем контуров полей
   drawnItems = new L.FeatureGroup();
   map.addLayer(drawnItems);
 
-  // Leaflet Draw Control
+  // Элементы управления рисованием контуров Leaflet Draw
   drawControl = new L.Control.Draw({
     draw: {
       polygon: {
@@ -135,7 +142,7 @@ function initMap() {
   });
   map.addControl(drawControl);
 
-  // Drawing event listeners
+  // Обработчики событий рисования контуров
   map.on(L.Draw.Event.DRAWSTART, () => {
     setDrawingMode(true);
   });
@@ -144,7 +151,7 @@ function initMap() {
     setDrawingMode(false);
   });
 
-  // Handle custom polygon drawn
+  // Обработка завершения рисования пользовательского полигона
   map.on(L.Draw.Event.CREATED, (event) => {
     const layer = event.layer;
     const geojson = layer.toGeoJSON();
@@ -156,7 +163,7 @@ function initMap() {
     const centerLon = sumLon / coords.length;
     const areaHa = calculatePolygonAreaHa(coords);
 
-    // Guardrail: maximum 10,000 ha for single agricultural field
+    // Ограничение: максимум 10 000 га для контура одного поля
     const MAX_FIELD_AREA_HA = 10000;
     if (areaHa > MAX_FIELD_AREA_HA) {
       drawnItems.removeLayer(layer);
@@ -168,7 +175,7 @@ function initMap() {
     drawnItems.addLayer(layer);
     setDrawingMode(false);
 
-    // Open modal to name the field and select custom color
+    // Открытие модального окна для ввода названия и выбора цвета поля
     openFieldModal({
       isNew: true,
       name: `Поле #${fieldCounter} (${areaHa.toFixed(1)} га)`,
@@ -182,7 +189,7 @@ function initMap() {
     });
   });
 
-  // Track vertex placement to update floating toolbar
+  // Отслеживание добавления вершин для обновления плавающей панели
   map.on(L.Draw.Event.DRAWVERTEX, () => {
     updateDrawToolbarState();
   });
@@ -192,7 +199,7 @@ function initMap() {
     }
   });
 
-  // Cursor tracking during drawing mode
+  // Отслеживание курсора в режиме интерактивного рисования
   const cursorTooltip = document.getElementById("cursorGeoTooltip");
   map.on("mousemove", (e) => {
     if (!isDrawingActive) {
@@ -245,7 +252,24 @@ function setDrawingMode(active) {
 }
 
 function startDrawingField() {
-  // If zoomed out too far, automatically zoom to field level (zoom 12)
+  // Проверка: выбрана ли папка (группа) полей перед началом рисования
+  if (!activeGroupId || !customFieldGroups[activeGroupId]) {
+    const groupKeys = Object.keys(customFieldGroups);
+    if (groupKeys.length === 0) {
+      showToast("Предупреждение: создайте папку перед рисованием контура поля!", true);
+      const createGroupBtn = document.getElementById("createGroupBtn");
+      if (createGroupBtn) createGroupBtn.click();
+    } else {
+      showToast("Предупреждение: создайте папку или выберите существующую из списка!", true);
+      const regionSelect = document.getElementById("regionSelect");
+      if (regionSelect) {
+        regionSelect.focus();
+      }
+    }
+    return;
+  }
+
+  // Автоматическое приближение карты до уровня полей (зум 12), если масштаб слишком общий
   if (map.getZoom() < 11) {
     showToast("🔍 Карта автоматически приближена (зум 12) для четкой видимости границ поля и защиты от захвата лишних земель.");
     map.setZoom(12, { animate: true });
@@ -280,7 +304,7 @@ function updateDrawToolbarState() {
       const ll = m.getLatLng();
       return [ll.lng, ll.lat];
     });
-    coords.push(coords[0]); // close polygon for calculation
+    coords.push(coords[0]); // Замыкание контура полигона для геометрического расчета площади
     const areaHa = calculatePolygonAreaHa(coords);
 
     if (areaEl) areaEl.textContent = `${areaHa.toFixed(1)} га`;
@@ -311,9 +335,100 @@ function updateDrawToolbarState() {
   }
 }
 
-// 2. Event Handlers
+// ============================================================================
+// ВЫБОР И АНАЛИЗ НАЙДЕННОГО ПОЛЯ OSM БЕЗ ДОБАВЛЕНИЯ В ГРУППУ
+// Поля группы содержат только поля, сохраненные пользователем в созданные папки
+// ============================================================================
+
+function selectAndAnalyzeOsmField(polyId) {
+  const osmField = osmFieldsData[polyId];
+  if (!osmField) return;
+
+  selectedFieldId = polyId;
+
+  // Селектор «Поля группы» не пополняется чужими полями OSM
+  const select = document.getElementById("polygonSelect");
+  if (select) {
+    select.value = "";
+  }
+
+  // Кнопки редактирования и удаления поля группы отключаются для несохраненного поля OSM
+  const editFieldBtn = document.getElementById("editFieldBtn");
+  if (editFieldBtn) editFieldBtn.disabled = true;
+  const deleteFieldBtn = document.getElementById("deleteFieldBtn");
+  if (deleteFieldBtn) deleteFieldBtn.disabled = true;
+
+  // Снимаем подсветку со всех полей группы
+  Object.keys(userSavedFields).forEach(id => {
+    const f = userSavedFields[id];
+    if (f && f.layer && typeof f.layer.setStyle === 'function') {
+      f.layer.setStyle({
+        color: f.color || "#00f0ff",
+        fillColor: f.color || "#00f0ff",
+        weight: 2.5,
+        fillOpacity: 0.25,
+        className: "verified-field-path"
+      });
+      if (f.layer._path) {
+        f.layer._path.classList.remove("cinematic-field-selected");
+      }
+    }
+  });
+
+  // Обновляем подсветку найденных слоев OSM (активный слой подсвечивается)
+  Object.keys(osmFieldLayers).forEach(id => {
+    const l = osmFieldLayers[id];
+    if (!l) return;
+    const isThis = (id === polyId);
+    if (typeof l.setStyle === 'function') {
+      l.setStyle({
+        color: isThis ? "#34d399" : "#10b981",
+        fillColor: isThis ? "#34d399" : "#10b981",
+        weight: isThis ? 4.5 : 2,
+        fillOpacity: isThis ? 0.45 : 0.28,
+        className: isThis ? "verified-field-path cinematic-field-selected" : "verified-field-path"
+      });
+    }
+    if (l._path) {
+      if (isThis) {
+        l._path.classList.add("cinematic-field-selected");
+      } else {
+        l._path.classList.remove("cinematic-field-selected");
+      }
+    }
+    if (isThis && typeof l.bringToFront === 'function') {
+      l.bringToFront();
+    }
+  });
+
+  // Кинематографический перелет камеры к выбранному контуру OSM
+  if (osmField.layer && typeof osmField.layer.getBounds === 'function' && osmField.layer.getBounds().isValid()) {
+    const bounds = osmField.layer.getBounds();
+    let optimalZoom = 14;
+    try {
+      optimalZoom = Math.min(Math.max(map.getBoundsZoom(bounds, false, [75, 75]), 13), 16);
+    } catch (e) {
+      optimalZoom = 14;
+    }
+    if (typeof map.flyTo === 'function') {
+      map.flyTo(bounds.getCenter(), optimalZoom, { animate: true, duration: 1.2 });
+    } else {
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+    }
+  } else if (osmField.centerLat && osmField.centerLon) {
+    map.flyTo([osmField.centerLat, osmField.centerLon], 14, { animate: true, duration: 1.2 });
+  }
+
+  updateCoordinatesDisplay(osmField.centerLat, osmField.centerLon, osmField.areaHa);
+  showToast(`Поле выбрано: «${osmField.name}» (нажмите ПКМ для сохранения в группу)`);
+
+  // Запуск комплексного спутникового анализа контура
+  analyzeCustomPolygon(osmField);
+}
+
+// 2. Обработчики событий интерфейса
 function initEventHandlers() {
-  // Layer Switchers
+  // Переключение базовых слоев (Спутник / Схема)
   document.getElementById("layerSatBtn").addEventListener("click", () => {
     map.removeLayer(osmLayer);
     map.addLayer(esriSatelliteLayer);
@@ -328,7 +443,7 @@ function initEventHandlers() {
     document.getElementById("layerSatBtn").classList.remove("active");
   });
 
-  // Clear OSM Farmlands Button
+  // Кнопка очистки найденных полей OSM
   const clearOsmBtn = document.getElementById("clearOsmBtn");
   if (clearOsmBtn) {
     clearOsmBtn.addEventListener("click", () => {
@@ -339,12 +454,16 @@ function initEventHandlers() {
         }
       });
       osmFieldLayers = {};
+      osmFieldsData = {};
+      if (selectedFieldId && !userSavedFields[selectedFieldId]) {
+        selectedFieldId = null;
+      }
       clearOsmBtn.classList.add("hidden");
       showToast(`Слой найденных полей OSM убран с карты (${count} объектов)`);
     });
   }
 
-  // Dynamic OpenStreetMap Farmland Search Button
+  // Кнопка динамического поиска полей через OpenStreetMap Overpass API
   const fetchOsmBtn = document.getElementById("fetchOsmBtn");
   if (fetchOsmBtn) {
     fetchOsmBtn.addEventListener("click", async () => {
@@ -372,7 +491,7 @@ function initEventHandlers() {
         } else {
           features.forEach(f => {
             const polyId = f.properties.anon_polygon_id;
-            if (osmFieldLayers[polyId]) return; // Already on map
+            if (osmFieldLayers[polyId]) return; // Поле уже добавлено на карту
             
             const coords = f.geometry.coordinates[0];
             let sumLat = 0, sumLon = 0;
@@ -393,26 +512,94 @@ function initEventHandlers() {
             
             osmFieldLayers[polyId] = layer;
             
+            const shortTitle = (f.properties.name && !f.properties.name.startsWith("Поле OSM"))
+              ? `${f.properties.name}`
+              : `Поле #${Object.keys(osmFieldLayers).length}`;
+
             layer.bindPopup(`
               <div style="font-family: sans-serif; font-size: 13px; color: #111;">
                 <strong>${f.properties.name}</strong><br>
                 Культура: <b>${f.properties.crop_type}</b><br>
                 Площадь: <b>${areaHa} га</b><br>
                 Источник: <b>OpenStreetMap</b><br>
-                <span style="color: #0284c7; font-size: 11px;">Кликните для добавления в сохраненные поля</span>
+                <div style="margin-top: 6px; font-size: 11.5px; color: #475569; line-height: 1.4;">
+                  <span><b>ЛКМ</b> — выбрать и анализировать поле</span><br>
+                  <span><b>ПКМ</b> — добавить в папку / группу</span>
+                </div>
+                <div style="margin-top: 8px;">
+                  <button type="button" class="btn-osm-popup-action" style="background: #0284c7; color: #fff; border: none; padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; font-weight: 600;">
+                    <i class="fa-solid fa-folder-plus"></i> Добавить в группу
+                  </button>
+                </div>
               </div>
             `);
-            
+
+            osmFieldsData[polyId] = {
+              id: polyId,
+              name: shortTitle,
+              color: "#10b981",
+              geojson: f,
+              areaHa: areaHa,
+              centerLat: cLat,
+              centerLon: cLon,
+              layer: layer,
+              isOsm: true
+            };
+
+            // Обработка клика левой кнопкой мыши (ЛКМ) — автономный спутниковый анализ без добавления в группу
             layer.on("click", () => {
-              const fieldName = `🌱 ${f.properties.name}`;
-              registerCustomField(polyId, fieldName, "#10b981", f, areaHa, cLat, cLon, layer);
-              activateAndAnalyzeField(polyId);
-              showToast(`Поле OSM сохранено: ${fieldName}`);
+              selectAndAnalyzeOsmField(polyId);
+            });
+
+            // Обработка клика правой кнопкой мыши (ПКМ) — открытие диалога добавления в группу / создания новой папки
+            layer.on("contextmenu", (e) => {
+              if (e && e.originalEvent) {
+                e.originalEvent.preventDefault();
+                e.originalEvent.stopPropagation();
+              }
+              if (map) map.closePopup();
+              try { layer.closePopup(); } catch (err) {}
+
+              openOsmAddToGroupModal({
+                polyId,
+                name: shortTitle,
+                cropType: f.properties.crop_type || "зерновые",
+                areaHa,
+                centerLat: cLat,
+                centerLon: cLon,
+                geojson: f,
+                layer
+              });
+            });
+
+            // Обработка клика по кнопке добавления внутри всплывающего окна
+            layer.on("popupopen", () => {
+              const popupEl = layer.getPopup() ? layer.getPopup().getElement() : null;
+              if (popupEl) {
+                const btn = popupEl.querySelector(".btn-osm-popup-action");
+                if (btn) {
+                  btn.onclick = (e) => {
+                    if (e) e.stopPropagation();
+                    if (map) map.closePopup();
+                    try { layer.closePopup(); } catch (err) {}
+                    openOsmAddToGroupModal({
+                      polyId,
+                      name: shortTitle,
+                      cropType: f.properties.crop_type || "зерновые",
+                      areaHa,
+                      centerLat: cLat,
+                      centerLon: cLon,
+                      geojson: f,
+                      layer
+                    });
+                  };
+                }
+              }
             });
           });
           
           if (clearOsmBtn) clearOsmBtn.classList.remove("hidden");
-          showToast(`Найдено ${features.length} полей из OpenStreetMap! Кликните по любому полю для анализа.`);
+          showToast(`Найдено ${features.length} полей из OpenStreetMap! ЛКМ — выбор и анализ поля, ПКМ — добавить в папку.`);
         }
       } catch (err) {
         console.error("Ошибка запроса OSM:", err);
@@ -423,7 +610,7 @@ function initEventHandlers() {
     });
   }
 
-  // Select polygon from dropdown
+  // Выбор поля из выпадающего списка
   document.getElementById("polygonSelect").addEventListener("change", (e) => {
     const polyId = e.target.value;
     if (polyId && userSavedFields[polyId]) {
@@ -431,7 +618,7 @@ function initEventHandlers() {
     }
   });
 
-  // Edit Field Button
+  // Кнопка редактирования параметров поля
   const editFieldBtn = document.getElementById("editFieldBtn");
   if (editFieldBtn) {
     editFieldBtn.addEventListener("click", () => {
@@ -453,7 +640,7 @@ function initEventHandlers() {
     });
   }
 
-  // Delete Field Button
+  // Кнопка удаления выбранного поля
   const deleteFieldBtn = document.getElementById("deleteFieldBtn");
   if (deleteFieldBtn) {
     deleteFieldBtn.addEventListener("click", () => {
@@ -463,7 +650,7 @@ function initEventHandlers() {
     });
   }
 
-  // Delete Group Button
+  // Кнопка удаления выбранной группы полей
   const deleteGroupBtn = document.getElementById("deleteGroupBtn");
   if (deleteGroupBtn) {
     deleteGroupBtn.addEventListener("click", () => {
@@ -471,17 +658,18 @@ function initEventHandlers() {
     });
   }
 
-  // Select crop
+  // Изменение сельскохозяйственной культуры
   const cropSelectEl = document.getElementById("cropSelect");
   if (cropSelectEl) {
     cropSelectEl.addEventListener("change", () => {
-      if (selectedFieldId && userSavedFields[selectedFieldId]) {
-        activateAndAnalyzeField(selectedFieldId);
+      const activeField = getActiveFieldObject();
+      if (activeField) {
+        analyzeCustomPolygon(activeField);
       }
     });
   }
 
-  // Draw Button in Header
+  // Кнопка включения режима рисования в шапке
   const drawModeBtn = document.getElementById("drawModeBtn");
   if (drawModeBtn) {
     drawModeBtn.addEventListener("click", () => {
@@ -489,7 +677,7 @@ function initEventHandlers() {
     });
   }
 
-  // Floating Toolbar Buttons
+  // Кнопки управления в плавающей панели рисования
   const finishBtn = document.getElementById("finishDrawBtn");
   if (finishBtn) {
     finishBtn.addEventListener("click", () => {
@@ -516,7 +704,7 @@ function initEventHandlers() {
     });
   }
 
-  // Global Keyboard Shortcuts for Drawing
+  // Глобальные горячие клавиши в режиме рисования
   document.addEventListener("keydown", (e) => {
     if (!isDrawingActive) return;
 
@@ -538,22 +726,7 @@ function initEventHandlers() {
     }
   });
 
-  // Batch Modal
-  const modal = document.getElementById("batchModal");
-  document.getElementById("batchModalBtn").addEventListener("click", () => {
-    modal.classList.remove("hidden");
-    loadBatchStatus();
-  });
-
-  document.getElementById("closeModalBtn").addEventListener("click", () => {
-    modal.classList.add("hidden");
-  });
-
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.classList.add("hidden");
-  });
-
-  // Chart Zoom Toolbar Listeners
+  // Управление масштабированием графиков Chart.js
   const zoomInBtn = document.getElementById("chartZoomInBtn");
   if (zoomInBtn) {
     zoomInBtn.addEventListener("click", () => {
@@ -581,7 +754,7 @@ function initEventHandlers() {
     });
   }
 
-  // Double-click on chart canvases to reset zoom
+  // Двойной клик по графику для сброса масштаба к исходному диапазону
   const ndviCanvas = document.getElementById("ndviChart");
   if (ndviCanvas) {
     ndviCanvas.addEventListener("dblclick", () => {
@@ -597,7 +770,7 @@ function initEventHandlers() {
   }
 }
 
-// 3. Date Range and Controls Initialization
+// 3. Инициализация диапазона дат и элементов управления
 async function initDropdowns() {
   const startInput = document.getElementById("startDateInput");
   const endInput = document.getElementById("endDateInput");
@@ -722,9 +895,10 @@ async function initDropdowns() {
   }
 
   function handleValidDateApplied() {
-    if (selectedFieldId && userSavedFields[selectedFieldId]) {
+    const activeField = getActiveFieldObject();
+    if (activeField) {
       showToast(`Обновление спутникового анализа за период: ${selectedStartDate} .. ${selectedEndDate}`);
-      analyzeCustomPolygon(userSavedFields[selectedFieldId]);
+      analyzeCustomPolygon(activeField);
     }
   }
 
@@ -847,8 +1021,9 @@ async function initDropdowns() {
 
   if (cropSelect) {
     cropSelect.addEventListener("change", () => {
-      if (selectedFieldId && userSavedFields[selectedFieldId]) {
-        analyzeCustomPolygon(userSavedFields[selectedFieldId]);
+      const activeField = getActiveFieldObject();
+      if (activeField) {
+        analyzeCustomPolygon(activeField);
       }
     });
   }
@@ -860,7 +1035,7 @@ async function initDropdowns() {
         activateAndAnalyzeField(fieldId);
       }
     });
-    polySelect.innerHTML = `<option value="" disabled selected>— Нет полей (нарисуйте на карте или найдите в OSM) —</option>`;
+    polySelect.innerHTML = `<option value="" disabled selected>— Нет активной группы (выберите папку или добавьте поле через ПКМ) —</option>`;
   }
 }
 
@@ -1013,6 +1188,8 @@ function deleteCurrentGroup() {
 
   const deleteGroupBtn = document.getElementById("deleteGroupBtn");
   if (deleteGroupBtn) deleteGroupBtn.disabled = true;
+  const editGroupBtn = document.getElementById("editGroupBtn");
+  if (editGroupBtn) editGroupBtn.disabled = true;
   const editFieldBtn = document.getElementById("editFieldBtn");
   if (editFieldBtn) editFieldBtn.disabled = true;
   const deleteFieldBtn = document.getElementById("deleteFieldBtn");
@@ -1103,32 +1280,66 @@ function deleteSelectedField(fieldId) {
   }
 }
 
+let currentEditingGroupId = null;
+
 function initGroupModal() {
   const createGroupBtn = document.getElementById("createGroupBtn");
+  const editGroupBtn = document.getElementById("editGroupBtn");
   const groupModal = document.getElementById("groupModal");
   const closeGroupModalBtn = document.getElementById("closeGroupModalBtn");
   const cancelGroupModalBtn = document.getElementById("cancelGroupModalBtn");
   const saveGroupModalBtn = document.getElementById("saveGroupModalBtn");
   const groupNameInput = document.getElementById("groupNameInput");
   const groupDescInput = document.getElementById("groupDescInput");
+  const modalTitle = document.getElementById("groupModalTitle");
+  const modalDescText = document.getElementById("groupModalDescText");
+  const saveBtnText = document.getElementById("saveGroupModalBtnText");
 
   if (!groupModal) return;
 
-  function openModal() {
-    if (groupNameInput) groupNameInput.value = "";
-    if (groupDescInput) groupDescInput.value = "";
+  function openModal(groupId = null) {
+    currentEditingGroupId = groupId;
+    if (groupId && customFieldGroups[groupId]) {
+      const grp = customFieldGroups[groupId];
+      if (modalTitle) modalTitle.innerHTML = `<i class="fa-solid fa-pen-to-square text-cyan"></i> <span>Переименовать группу полей</span>`;
+      if (modalDescText) modalDescText.textContent = `Измените название или примечание группы «${grp.name}». Это имя отображается в выпадающих списках и паспортах полей:`;
+      if (saveBtnText) saveBtnText.textContent = "Сохранить изменения";
+      if (groupNameInput) groupNameInput.value = grp.name || "";
+      if (groupDescInput) groupDescInput.value = grp.desc || "";
+    } else {
+      currentEditingGroupId = null;
+      if (modalTitle) modalTitle.innerHTML = `<i class="fa-solid fa-folder-plus text-cyan"></i> <span>Создать группу полей</span>`;
+      if (modalDescText) modalDescText.textContent = `Созданная группа полей появится в категории «Группы». Вы сможете объединить свои поля (по хозяйству, севообороту или кластеру) и переключаться между ними:`;
+      if (saveBtnText) saveBtnText.textContent = "Создать группу";
+      if (groupNameInput) groupNameInput.value = "";
+      if (groupDescInput) groupDescInput.value = "";
+    }
+
     groupModal.classList.remove("hidden");
     if (groupNameInput) {
-      setTimeout(() => groupNameInput.focus(), 60);
+      setTimeout(() => {
+        groupNameInput.focus();
+        groupNameInput.select();
+      }, 60);
     }
   }
 
   function closeModal() {
     groupModal.classList.add("hidden");
+    currentEditingGroupId = null;
   }
 
   if (createGroupBtn) {
-    createGroupBtn.addEventListener("click", openModal);
+    createGroupBtn.addEventListener("click", () => openModal(null));
+  }
+  if (editGroupBtn) {
+    editGroupBtn.addEventListener("click", () => {
+      if (!activeGroupId || !customFieldGroups[activeGroupId]) {
+        showToast("Пожалуйста, сначала выберите группу полей из списка!", true);
+        return;
+      }
+      openModal(activeGroupId);
+    });
   }
   if (closeGroupModalBtn) {
     closeGroupModalBtn.addEventListener("click", closeModal);
@@ -1151,6 +1362,28 @@ function initGroupModal() {
       return;
     }
 
+    if (currentEditingGroupId && customFieldGroups[currentEditingGroupId]) {
+      // Режим переименования и редактирования существующей группы
+      const grp = customFieldGroups[currentEditingGroupId];
+      const oldName = grp.name;
+      grp.name = name;
+      grp.desc = desc;
+
+      saveGroupsToStorage();
+      renderGroupsInRegionSelect();
+
+      // Обновление заголовка полей группы в шапке
+      const labelEl = document.getElementById("polygonSelectLabel");
+      if (labelEl && activeGroupId === currentEditingGroupId) {
+        labelEl.innerHTML = `<i class="fa-solid fa-folder-open"></i> Поля группы (${name}):`;
+      }
+
+      closeModal();
+      showToast(`Группа полей «${oldName}» успешно переименована в «${name}»!`);
+      return;
+    }
+
+    // Режим создания новой группы
     const groupId = `group_${Date.now()}`;
     customFieldGroups[groupId] = {
       id: groupId,
@@ -1189,6 +1422,336 @@ function initGroupModal() {
       });
     }
   });
+}
+
+// Временное хранение метаданных поля OSM при открытии диалога добавления в группу
+let currentPendingOsmField = null;
+
+// Открытие модального окна добавления найденного поля OSM в группу
+function openOsmAddToGroupModal(fieldData) {
+  if (!fieldData) return;
+  currentPendingOsmField = fieldData;
+
+  const modal = document.getElementById("osmFieldModal");
+  if (!modal) return;
+
+  const customFieldNameInput = document.getElementById("osmCustomFieldNameInput");
+  const nameEl = document.getElementById("osmModalFieldName");
+  const areaEl = document.getElementById("osmModalFieldArea");
+  const cropEl = document.getElementById("osmModalFieldCrop");
+  const groupSelect = document.getElementById("osmExistingGroupSelect");
+  const actionExistingRadio = document.getElementById("osmActionExisting");
+  const actionNewRadio = document.getElementById("osmActionNew");
+  const existingWrap = document.getElementById("osmExistingGroupSelectWrap");
+  const newWrap = document.getElementById("osmNewGroupInputWrap");
+  const existingOptionWrap = document.getElementById("osmGroupExistingOptionWrap");
+  const newNameInput = document.getElementById("osmNewGroupNameInput");
+
+  // Обязательное поле ввода названия поля (в начале формы)
+  if (customFieldNameInput) {
+    customFieldNameInput.value = "";
+    customFieldNameInput.classList.remove("input-error");
+    const placeholderHint = (fieldData.name && !fieldData.name.startsWith("Поле OSM") && !fieldData.name.startsWith("Поле #"))
+      ? `Например: ${fieldData.name}`
+      : "Введите название поля (обязательно)";
+    customFieldNameInput.placeholder = placeholderHint;
+  }
+
+  if (nameEl) nameEl.textContent = fieldData.name || "Поле OSM";
+  if (areaEl) areaEl.textContent = `${Number(fieldData.areaHa || 0).toFixed(1)} га`;
+  if (cropEl) cropEl.textContent = fieldData.cropType || "зерновые";
+
+  // Заполнение выпадающего списка существующих групп
+  const groupKeys = Object.keys(customFieldGroups);
+  if (groupSelect) {
+    groupSelect.innerHTML = "";
+    groupSelect.classList.remove("input-error");
+  }
+
+  if (groupKeys.length > 0) {
+    if (existingOptionWrap) {
+      existingOptionWrap.style.opacity = "1";
+      existingOptionWrap.style.pointerEvents = "auto";
+    }
+    if (actionExistingRadio) {
+      actionExistingRadio.disabled = false;
+      actionExistingRadio.checked = true;
+    }
+    if (actionNewRadio) {
+      actionNewRadio.checked = false;
+    }
+    if (existingWrap) existingWrap.style.display = "block";
+    if (newWrap) newWrap.style.display = "none";
+
+    groupKeys.forEach(gId => {
+      const grp = customFieldGroups[gId];
+      const count = Object.keys(grp.fields || {}).length;
+      const opt = document.createElement("option");
+      opt.value = grp.id;
+      opt.textContent = `📁 ${grp.name} (${count} ${getRussianFieldCountWord(count)})`;
+      if (groupSelect) groupSelect.appendChild(opt);
+    });
+
+    // Если активна какая-то группа, выбираем её по умолчанию
+    if (groupSelect && activeGroupId && customFieldGroups[activeGroupId]) {
+      groupSelect.value = activeGroupId;
+    }
+  } else {
+    // Если еще нет ни одной группы, переключаем на создание новой
+    if (existingOptionWrap) {
+      existingOptionWrap.style.opacity = "0.45";
+      existingOptionWrap.style.pointerEvents = "none";
+    }
+    if (actionExistingRadio) {
+      actionExistingRadio.disabled = true;
+      actionExistingRadio.checked = false;
+    }
+    if (actionNewRadio) {
+      actionNewRadio.checked = true;
+    }
+    if (existingWrap) existingWrap.style.display = "none";
+    if (newWrap) newWrap.style.display = "block";
+  }
+
+  // Генерация названия по умолчанию для новой группы (например: "Мои поля" или "Мои поля 2")
+  let defaultNewGroupName = "Мои поля";
+  const existingNames = Object.values(customFieldGroups).map(g => (g.name || "").trim().toLowerCase());
+  if (existingNames.includes(defaultNewGroupName.toLowerCase())) {
+    let counter = 2;
+    while (existingNames.includes(`мои поля ${counter}`)) {
+      counter++;
+    }
+    defaultNewGroupName = `Мои поля ${counter}`;
+  }
+
+  if (newNameInput) {
+    newNameInput.value = defaultNewGroupName;
+    newNameInput.classList.remove("input-error");
+  }
+
+  modal.classList.remove("hidden");
+
+  // Автоматическая установка фокуса на обязательное поле названия поля
+  if (customFieldNameInput) {
+    setTimeout(() => {
+      customFieldNameInput.focus();
+    }, 60);
+  }
+}
+
+// Закрытие модального окна добавления поля OSM
+function closeOsmFieldModal() {
+  const modal = document.getElementById("osmFieldModal");
+  if (modal) modal.classList.add("hidden");
+  currentPendingOsmField = null;
+}
+
+// Подтверждение добавления поля OSM в выбранную или новую группу
+async function confirmOsmAddToGroup() {
+  if (!currentPendingOsmField) {
+    showToast("Данные поля не найдены!", true);
+    closeOsmFieldModal();
+    return;
+  }
+
+  // 1. Проверка обязательного ввода названия поля (для обоих вариантов действий)
+  const customFieldNameInput = document.getElementById("osmCustomFieldNameInput");
+  const fieldName = customFieldNameInput ? customFieldNameInput.value.trim() : "";
+  if (!fieldName) {
+    showToast("Пожалуйста, обязательно укажите название поля!", true);
+    if (customFieldNameInput) {
+      customFieldNameInput.classList.add("input-error");
+      customFieldNameInput.focus();
+    }
+    return;
+  }
+
+  const actionNewRadio = document.getElementById("osmActionNew");
+  const isNewGroup = actionNewRadio && actionNewRadio.checked;
+  const groupSelect = document.getElementById("osmExistingGroupSelect");
+  const newNameInput = document.getElementById("osmNewGroupNameInput");
+
+  let targetGroupId = null;
+  let targetGroupName = "";
+
+  if (isNewGroup) {
+    let chosenName = newNameInput ? newNameInput.value.trim() : "";
+    if (!chosenName) {
+      showToast("Пожалуйста, обязательно укажите название новой папки!", true);
+      if (newNameInput) {
+        newNameInput.classList.add("input-error");
+        newNameInput.focus();
+      }
+      return;
+    }
+    targetGroupId = `group_${Date.now()}`;
+    targetGroupName = chosenName;
+
+    customFieldGroups[targetGroupId] = {
+      id: targetGroupId,
+      name: targetGroupName,
+      desc: "Создано из контуров OpenStreetMap",
+      createdAt: new Date().toISOString(),
+      fields: {}
+    };
+  } else {
+    targetGroupId = groupSelect ? groupSelect.value : null;
+    if (!targetGroupId || !customFieldGroups[targetGroupId]) {
+      showToast("Пожалуйста, выберите существующую группу полей!", true);
+      if (groupSelect) {
+        groupSelect.classList.add("input-error");
+        groupSelect.focus();
+      }
+      return;
+    }
+    targetGroupName = customFieldGroups[targetGroupId].name;
+  }
+
+  const polyId = currentPendingOsmField.polyId;
+  const areaHa = currentPendingOsmField.areaHa;
+  const cLat = currentPendingOsmField.centerLat;
+  const cLon = currentPendingOsmField.centerLon;
+  const geojson = currentPendingOsmField.geojson;
+  const layer = currentPendingOsmField.layer;
+
+  // Добавляем поле с указанным пользователем названием в выбранную группу
+  if (!customFieldGroups[targetGroupId].fields) {
+    customFieldGroups[targetGroupId].fields = {};
+  }
+
+  customFieldGroups[targetGroupId].fields[polyId] = {
+    id: polyId,
+    name: fieldName,
+    color: "#00f0ff",
+    geojson: geojson,
+    areaHa: areaHa,
+    centerLat: cLat,
+    centerLon: cLon
+  };
+
+  // Удаляем контур из найденных данных OSM, так как он стал полноценным полем группы
+  if (osmFieldsData[polyId]) {
+    delete osmFieldsData[polyId];
+  }
+
+  // Сохраняем обновленные группы в localStorage и обновляем селекторы
+  saveGroupsToStorage();
+  renderGroupsInRegionSelect();
+
+  // Переключаемся на целевую группу с сохранением видимости слоев OSM на карте
+  await switchRegion(targetGroupId, false, true);
+
+  // Обновляем стиль и всплывающее окно для сохраненного контура
+  if (layer && layer.setStyle) {
+    layer.setStyle({
+      color: "#00f0ff",
+      fillColor: "#00f0ff",
+      weight: 3.5,
+      fillOpacity: 0.35,
+      className: "verified-field-path"
+    });
+    layer.bindPopup(`
+      <div style="font-family: sans-serif; font-size: 13px; color: #111;">
+        <strong>📁 ${targetGroupName}: ${fieldName}</strong><br>
+        Площадь: <b>${Number(areaHa).toFixed(1)} га</b><br>
+        <span style="color: #059669; font-weight: 600; font-size: 11.5px;">✓ Сохранено в группе «${targetGroupName}»</span><br>
+        <span style="color: #0284c7; font-size: 11px;">Кликните на контур для запуска анализа</span>
+      </div>
+    `);
+  }
+
+  // Активируем выбранное поле и запускаем расчет аналитики
+  activateAndAnalyzeField(polyId);
+
+  closeOsmFieldModal();
+
+  if (isNewGroup) {
+    showToast(`Создана папка «${targetGroupName}» с полем «${fieldName}»!`);
+  } else {
+    showToast(`Поле «${fieldName}» добавлено в группу «${targetGroupName}»!`);
+  }
+}
+
+// Инициализация событий модального окна добавления поля OSM
+function initOsmFieldModal() {
+  const modal = document.getElementById("osmFieldModal");
+  const closeBtn = document.getElementById("closeOsmFieldModalBtn");
+  const cancelBtn = document.getElementById("cancelOsmFieldModalBtn");
+  const confirmBtn = document.getElementById("confirmOsmFieldModalBtn");
+  const actionExistingRadio = document.getElementById("osmActionExisting");
+  const actionNewRadio = document.getElementById("osmActionNew");
+  const existingWrap = document.getElementById("osmExistingGroupSelectWrap");
+  const newWrap = document.getElementById("osmNewGroupInputWrap");
+  const newNameInput = document.getElementById("osmNewGroupNameInput");
+  const groupSelect = document.getElementById("osmExistingGroupSelect");
+  const customFieldNameInput = document.getElementById("osmCustomFieldNameInput");
+
+  if (!modal) return;
+
+  if (closeBtn) closeBtn.addEventListener("click", closeOsmFieldModal);
+  if (cancelBtn) cancelBtn.addEventListener("click", closeOsmFieldModal);
+  if (confirmBtn) confirmBtn.addEventListener("click", confirmOsmAddToGroup);
+
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeOsmFieldModal();
+  });
+
+  if (customFieldNameInput) {
+    customFieldNameInput.addEventListener("input", () => {
+      customFieldNameInput.classList.remove("input-error");
+    });
+    customFieldNameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (actionNewRadio && actionNewRadio.checked && newNameInput && !newNameInput.value.trim()) {
+          newNameInput.focus();
+        } else {
+          confirmOsmAddToGroup();
+        }
+      } else if (e.key === "Escape") {
+        closeOsmFieldModal();
+      }
+    });
+  }
+
+  if (groupSelect) {
+    groupSelect.addEventListener("change", () => {
+      groupSelect.classList.remove("input-error");
+    });
+  }
+
+  const toggleAction = () => {
+    if (actionNewRadio && actionNewRadio.checked) {
+      if (existingWrap) existingWrap.style.display = "none";
+      if (newWrap) newWrap.style.display = "block";
+      if (newNameInput) {
+        if (!customFieldNameInput || customFieldNameInput.value.trim()) {
+          newNameInput.focus();
+          newNameInput.select();
+        }
+      }
+    } else {
+      if (existingWrap) existingWrap.style.display = "block";
+      if (newWrap) newWrap.style.display = "none";
+    }
+  };
+
+  if (actionExistingRadio) actionExistingRadio.addEventListener("change", toggleAction);
+  if (actionNewRadio) actionNewRadio.addEventListener("change", toggleAction);
+
+  if (newNameInput) {
+    newNameInput.addEventListener("input", () => {
+      newNameInput.classList.remove("input-error");
+    });
+    newNameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        confirmOsmAddToGroup();
+      } else if (e.key === "Escape") {
+        closeOsmFieldModal();
+      }
+    });
+  }
 }
 
 async function initRegionsModule() {
@@ -1364,7 +1927,7 @@ async function initRegionsModule() {
 }
 
 // Переключение на регион из каталога с автоматическим поиском полей в нем
-async function switchRegion(regionId, showFlyToast = true) {
+async function switchRegion(regionId, showFlyToast = true, preserveOsmFields = false) {
   // Проверяем, выбрана ли пользовательская группа полей
   if (regionId && regionId.startsWith("group_")) {
     activeGroupId = regionId;
@@ -1377,9 +1940,11 @@ async function switchRegion(regionId, showFlyToast = true) {
 
     const deleteGroupBtn = document.getElementById("deleteGroupBtn");
     if (deleteGroupBtn) deleteGroupBtn.disabled = false;
+    const editGroupBtn = document.getElementById("editGroupBtn");
+    if (editGroupBtn) editGroupBtn.disabled = false;
 
-    // 1. Очистка полей предыдущего региона/группы
-    clearPreviousRegionFields(group.name);
+    // 1. Очистка полей предыдущего региона/группы с учетом флага сохранения контуров OSM
+    clearPreviousRegionFields(group.name, !preserveOsmFields);
 
     // 2. Обновление заголовка полей
     const labelEl = document.getElementById("polygonSelectLabel");
@@ -1401,13 +1966,20 @@ async function switchRegion(regionId, showFlyToast = true) {
       return;
     }
 
-    if (select) select.innerHTML = "";
+    if (select) {
+      select.innerHTML = `<option value="" disabled selected>— Выберите поле группы «${group.name}» —</option>`;
+    }
     let firstFieldId = null;
     const bounds = L.latLngBounds([]);
 
     fieldKeys.forEach((fId, idx) => {
       const f = fields[fId];
       let layer = f.layer;
+      // Если слой уже отображается на карте в osmFieldLayers, повторно используем его
+      if (!layer && osmFieldLayers[fId]) {
+        layer = osmFieldLayers[fId];
+        f.layer = layer;
+      }
       if (!layer && f.geojson) {
         layer = L.geoJSON(f.geojson, {
           style: () => ({
@@ -1425,17 +1997,30 @@ async function switchRegion(regionId, showFlyToast = true) {
         if (!map.hasLayer(layer)) {
           drawnItems.addLayer(layer);
         }
+        if (layer.setStyle) {
+          layer.setStyle({
+            color: f.color || "#00f0ff",
+            fillColor: f.color || "#00f0ff",
+            weight: 3.5,
+            fillOpacity: 0.35,
+            className: "verified-field-path"
+          });
+        }
         try { bounds.extend(layer.getBounds()); } catch (e) {}
 
         layer.bindPopup(`
           <div style="font-family: sans-serif; font-size: 13px; color: #111;">
             <strong>📁 ${group.name}: ${f.name}</strong><br>
             Площадь: <b>${Number(f.areaHa).toFixed(1)} га</b><br>
+            <span style="color: #059669; font-weight: 600; font-size: 11.5px;">✓ Сохранено в группе «${group.name}»</span><br>
             <span style="color: #0284c7; font-size: 11px;">Кликните на контур для запуска анализа</span>
           </div>
         `);
 
-        layer.on("click", () => {
+        layer.off("click");
+        layer.on("click", (e) => {
+          if (e && e.originalEvent) e.originalEvent.stopPropagation();
+          layer.closePopup();
           userSavedFields[fId] = f;
           activateAndAnalyzeField(fId);
           showToast(`Поле выбрано: ${f.name}`);
@@ -1470,6 +2055,8 @@ async function switchRegion(regionId, showFlyToast = true) {
   activeGroupId = null;
   const deleteGroupBtn = document.getElementById("deleteGroupBtn");
   if (deleteGroupBtn) deleteGroupBtn.disabled = true;
+  const editGroupBtn = document.getElementById("editGroupBtn");
+  if (editGroupBtn) editGroupBtn.disabled = true;
   const region = regionsCatalog[regionId];
   if (!region) return;
 
@@ -1528,16 +2115,20 @@ async function switchToCustomLocation(item) {
 }
 
 // Функция полной очистки полей предыдущего региона
-function clearPreviousRegionFields(regionLabel = "") {
-  // 1. Удаляем с карты абсолютно все слои полей OSM предыдущего региона
-  Object.keys(osmFieldLayers).forEach(polyId => {
-    try {
-      if (osmFieldLayers[polyId]) {
-        map.removeLayer(osmFieldLayers[polyId]);
-      }
-    } catch (e) {}
-  });
-  osmFieldLayers = {};
+function clearPreviousRegionFields(regionLabel = "", clearOsm = true) {
+  // 1. Удаляем с карты слои полей OSM предыдущего региона при необходимости
+  if (clearOsm) {
+    Object.keys(osmFieldLayers).forEach(polyId => {
+      try {
+        if (osmFieldLayers[polyId]) {
+          map.removeLayer(osmFieldLayers[polyId]);
+        }
+      } catch (e) {}
+    });
+    osmFieldLayers = {};
+    const clearOsmBtn = document.getElementById("clearOsmBtn");
+    if (clearOsmBtn) clearOsmBtn.classList.add("hidden");
+  }
 
   // 2. Удаляем слои сохраненных полей из карты
   Object.keys(userSavedFields).forEach(polyId => {
@@ -1547,27 +2138,29 @@ function clearPreviousRegionFields(regionLabel = "") {
         if (drawnItems && drawnItems.hasLayer(f.layer)) {
           drawnItems.removeLayer(f.layer);
         }
-        map.removeLayer(f.layer);
+        // Если слой не из активных слоев OSM или если полностью очищаем OSM
+        if (clearOsm || !osmFieldLayers[polyId]) {
+          map.removeLayer(f.layer);
+        }
       } catch (e) {}
     }
   });
 
   // Полностью очищаем коллекцию полей, чтобы в списке не оставалось полей прошлых регионов
   userSavedFields = {};
+  osmFieldsData = {};
   selectedFieldId = null;
 
   // 3. Очищаем выпадающий список (#polygonSelect)
   const select = document.getElementById("polygonSelect");
   if (select) {
-    select.innerHTML = regionLabel 
-      ? `<option value="" disabled selected>— Загрузка полей (${regionLabel})... —</option>`
-      : '<option value="" disabled selected>— Загрузка полей региона... —</option>';
+    select.innerHTML = '<option value="" disabled selected>— Нет активной группы (выберите папку или добавьте поле через ПКМ) —</option>';
   }
 
   // 4. Обновляем метку в шапке
   const labelEl = document.getElementById("polygonSelectLabel");
   if (labelEl) {
-    labelEl.innerHTML = `<i class="fa-solid fa-map-pin"></i> Поля группы${regionLabel ? ` (${regionLabel})` : ''}:`;
+    labelEl.innerHTML = '<i class="fa-solid fa-map-pin"></i> Поля группы:';
   }
 
   // 5. Блокируем кнопку настроек и удаления поля до выбора нового контура
@@ -1593,16 +2186,8 @@ async function loadFarmlandsForBbox(bbox, regionLabel) {
     const features = data.features || [];
 
     if (features.length === 0) {
-      if (select) {
-        select.innerHTML = `<option value="" disabled selected>— В регионе «${regionLabel}» нет полей в OSM —</option>`;
-      }
       showToast(`В границах региона «${regionLabel}» контуры OSM не найдены. Нарисуйте поле вручную кнопкой «Нарисовать контур».`, true);
       return;
-    }
-
-    // Очищаем временный плейсхолдер перед добавлением полей текущего региона
-    if (select) {
-      select.innerHTML = "";
     }
 
     let firstFieldId = null;
@@ -1631,24 +2216,80 @@ async function loadFarmlandsForBbox(bbox, regionLabel) {
       const shortTitle = (f.properties.name && !f.properties.name.startsWith("Поле OSM")) ? f.properties.name : `Поле #${idx + 1}`;
       const fieldFullName = `${regionLabel}: ${shortTitle}`;
 
+      osmFieldsData[polyId] = {
+        id: polyId,
+        name: fieldFullName,
+        color: "#10b981",
+        geojson: f,
+        areaHa: areaHa,
+        centerLat: cLat,
+        centerLon: cLon,
+        layer: layer,
+        isOsm: true
+      };
+
       layer.bindPopup(`
         <div style="font-family: sans-serif; font-size: 13px; color: #111;">
           <strong>${fieldFullName}</strong><br>
           Регион: <b>${regionLabel}</b><br>
           Культура: <b>${f.properties.crop_type || 'зерновые'}</b><br>
           Площадь: <b>${areaHa} га</b><br>
-          <span style="color: #0284c7; font-size: 11px;">Кликните на контур поля для запуска анализа</span>
+          <div style="margin-top: 6px;">
+            <button type="button" class="btn-osm-popup-action" style="background: #0284c7; color: #fff; border: none; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+              <i class="fa-solid fa-folder-plus"></i> В группу полей
+            </button>
+          </div>
         </div>
       `);
 
-      layer.on("click", () => {
-        registerCustomField(polyId, fieldFullName, "#10b981", f, areaHa, cLat, cLon, layer);
-        activateAndAnalyzeField(polyId);
-        showToast(`Поле выбрано: ${fieldFullName}`);
+      layer.on("popupopen", () => {
+        const popupEl = layer.getPopup() ? layer.getPopup().getElement() : null;
+        if (popupEl) {
+          const btn = popupEl.querySelector(".btn-osm-popup-action");
+          if (btn) {
+            btn.onclick = (e) => {
+              if (e) e.stopPropagation();
+              layer.closePopup();
+              openOsmAddToGroupModal({
+                polyId,
+                name: shortTitle,
+                cropType: f.properties.crop_type || 'зерновые',
+                areaHa,
+                centerLat: cLat,
+                centerLon: cLon,
+                geojson: f,
+                layer
+              });
+            };
+          }
+        }
       });
 
-      // Автоматическая регистрация поля только для текущего выбранного региона
-      registerCustomField(polyId, fieldFullName, "#10b981", f, areaHa, cLat, cLon, layer);
+      // Обработка клика правой кнопкой мыши (ПКМ) для добавления в группу
+      layer.on("contextmenu", (e) => {
+        if (e && e.originalEvent) {
+          e.originalEvent.preventDefault();
+          e.originalEvent.stopPropagation();
+        }
+        if (map) map.closePopup();
+        try { layer.closePopup(); } catch (err) {}
+
+        openOsmAddToGroupModal({
+          polyId,
+          name: shortTitle,
+          cropType: f.properties.crop_type || 'зерновые',
+          areaHa,
+          centerLat: cLat,
+          centerLon: cLon,
+          geojson: f,
+          layer
+        });
+      });
+
+      // Клик левой кнопкой мыши по полю выбирает его и запускает спутниковый анализ без добавления в группу
+      layer.on("click", () => {
+        selectAndAnalyzeOsmField(polyId);
+      });
 
       if (idx === 0) {
         firstFieldId = polyId;
@@ -1657,9 +2298,9 @@ async function loadFarmlandsForBbox(bbox, regionLabel) {
 
     showToast(`Найдено ${features.length} полей региона «${regionLabel}».`);
 
-    // Автоматический запуск анализа первого поля для мгновенной отдачи результата
-    if (firstFieldId && userSavedFields[firstFieldId]) {
-      activateAndAnalyzeField(firstFieldId);
+    // Автоматический запуск анализа первого поля региона для мгновенного отображения аналитики
+    if (firstFieldId && osmFieldsData[firstFieldId]) {
+      selectAndAnalyzeOsmField(firstFieldId);
     }
   } catch (err) {
     console.error("Ошибка автопоиска полей региона:", err);
@@ -1777,13 +2418,13 @@ async function openRegionSummaryModal(regionId) {
   }
 }
 
-// 4. Register and Manage Custom Fields
+// 4. Регистрация и управление пользовательскими полями
 function registerCustomField(id, name, color, geojson, areaHa, centerLat, centerLon, layer) {
   const select = document.getElementById("polygonSelect");
   color = color || "#00f0ff";
 
   if (!userSavedFields[id]) {
-    // If it's the first added field or placeholder is present, clear placeholder
+    // Очистка заглушки списка при добавлении первого поля
     if (select && (Object.keys(userSavedFields).length === 0 || select.querySelector('option[disabled]'))) {
       select.innerHTML = "";
     }
@@ -1793,7 +2434,7 @@ function registerCustomField(id, name, color, geojson, areaHa, centerLat, center
     opt.textContent = `● ${name} (${Number(areaHa).toFixed(1)} га)`;
     select.appendChild(opt);
   } else {
-    // Update option text if already exists
+    // Обновление текста пункта списка, если поле уже было добавлено
     const opt = select.querySelector(`option[value="${id}"]`);
     if (opt) {
       opt.textContent = `● ${name} (${Number(areaHa).toFixed(1)} га)`;
@@ -1821,38 +2462,152 @@ function registerCustomField(id, name, color, geojson, areaHa, centerLat, center
       className: "verified-field-path"
     });
   }
+
+  // Привязка интерактивного клика по контуру поля для прямого выбора и кинематографического зума
+  const bindFieldLayerInteraction = (targetLayer) => {
+    if (!targetLayer) return;
+    if (typeof targetLayer.off === 'function') targetLayer.off('click');
+    if (typeof targetLayer.on === 'function') {
+      targetLayer.on('click', (e) => {
+        if (typeof L !== 'undefined' && L.DomEvent && e) {
+          L.DomEvent.stopPropagation(e);
+        }
+        activateAndAnalyzeField(id);
+        showToast(`Выбрано поле: «${name}»`);
+      });
+    }
+  };
+
+  bindFieldLayerInteraction(layer);
+  if (layer && typeof layer.eachLayer === 'function') {
+    layer.eachLayer(childLayer => bindFieldLayerInteraction(childLayer));
+  }
 }
 
-// 5. Activate and Analyze Selected Field
+// 5. Активация и спутниковый анализ выбранного поля
 async function activateAndAnalyzeField(fieldId) {
+  // Если это найденное поле OSM, перенаправляем на автономный анализ без добавления в группу
+  if (osmFieldsData[fieldId] && !userSavedFields[fieldId]) {
+    selectAndAnalyzeOsmField(fieldId);
+    return;
+  }
+
   selectedFieldId = fieldId;
   const select = document.getElementById("polygonSelect");
-  select.value = fieldId;
+  if (select) select.value = fieldId;
 
   const field = userSavedFields[fieldId];
   if (!field) return;
 
-  // Enable Edit and Delete buttons
+  // Активация кнопок редактирования и удаления
   const editFieldBtn = document.getElementById("editFieldBtn");
   if (editFieldBtn) editFieldBtn.disabled = false;
   const deleteFieldBtn = document.getElementById("deleteFieldBtn");
   if (deleteFieldBtn) deleteFieldBtn.disabled = false;
 
-  // Zoom map to active field
-  if (field.layer) {
-    map.fitBounds(field.layer.getBounds(), { padding: [40, 40], maxZoom: 14 });
+  // Автоматический кинематографический зум камеры на выбранное поле (профессиональный drone-flight)
+  if (field.layer && typeof field.layer.getBounds === 'function' && field.layer.getBounds().isValid()) {
+    const bounds = field.layer.getBounds();
+    const center = bounds.getCenter();
+    // Вычисляем оптимальный масштаб под размеры контура с комфортным охватом окружения
+    let optimalZoom = 14;
+    try {
+      optimalZoom = Math.min(Math.max(map.getBoundsZoom(bounds, false, [75, 75]), 13), 16);
+    } catch (e) {
+      optimalZoom = 14;
+    }
+
+    if (typeof map.flyTo === 'function') {
+      map.flyTo(center, optimalZoom, {
+        animate: true,
+        duration: 1.6,
+        easeLinearity: 0.22
+      });
+    } else if (typeof map.flyToBounds === 'function') {
+      map.flyToBounds(bounds, {
+        padding: [60, 60],
+        maxZoom: 15,
+        duration: 1.6,
+        easeLinearity: 0.22
+      });
+    } else {
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+    }
+  } else if (field.centerLat && field.centerLon) {
+    if (typeof map.flyTo === 'function') {
+      map.flyTo([field.centerLat, field.centerLon], 14, {
+        animate: true,
+        duration: 1.6,
+        easeLinearity: 0.22
+      });
+    } else {
+      map.setView([field.centerLat, field.centerLon], 14);
+    }
   }
 
-  // Update styles of all fields according to their custom colors
+  // Вспомогательная функция применения стилей и анимации свечения к SVG-путям
+  const updateFieldLayerHighlight = (targetLayer, isSelected, strokeColor) => {
+    if (!targetLayer) return;
+    if (typeof targetLayer.setStyle === 'function') {
+      targetLayer.setStyle({
+        color: strokeColor,
+        fillColor: strokeColor,
+        weight: isSelected ? 4.5 : 2.2,
+        fillOpacity: isSelected ? 0.48 : 0.22,
+        className: isSelected ? "verified-field-path cinematic-field-selected" : "verified-field-path"
+      });
+    }
+    // Прямое управление классами SVG-элемента для гарантии запуска CSS-анимации свечения
+    if (targetLayer._path) {
+      targetLayer._path.classList.add("verified-field-path");
+      if (isSelected) {
+        targetLayer._path.classList.remove("cinematic-field-selected");
+        void targetLayer._path.offsetWidth; // Принудительный перезапуск анимации
+        targetLayer._path.classList.add("cinematic-field-selected");
+      } else {
+        targetLayer._path.classList.remove("cinematic-field-selected");
+      }
+    }
+    if (typeof targetLayer.eachLayer === 'function') {
+      targetLayer.eachLayer(child => {
+        if (child._path) {
+          child._path.classList.add("verified-field-path");
+          if (isSelected) {
+            child._path.classList.remove("cinematic-field-selected");
+            void child._path.offsetWidth;
+            child._path.classList.add("cinematic-field-selected");
+          } else {
+            child._path.classList.remove("cinematic-field-selected");
+          }
+        }
+      });
+    }
+    if (isSelected && typeof targetLayer.bringToFront === 'function') {
+      targetLayer.bringToFront();
+    }
+  };
+
+  // Обновление подсветки всех полей: выбранное получает кинематографический импульс
   Object.keys(userSavedFields).forEach(id => {
     const f = userSavedFields[id];
-    if (f.layer && f.layer.setStyle) {
+    if (f.layer) {
       const col = f.color || "#00f0ff";
-      if (id === fieldId) {
-        f.layer.setStyle({ color: col, fillColor: col, weight: 3.5, fillOpacity: 0.5 });
-      } else {
-        f.layer.setStyle({ color: col, fillColor: col, weight: 2, fillOpacity: 0.22 });
-      }
+      updateFieldLayerHighlight(f.layer, id === fieldId, col);
+    }
+  });
+
+  // Снятие подсветки со всех найденных контуров OSM при переключении на поле группы
+  Object.keys(osmFieldLayers).forEach(id => {
+    const l = osmFieldLayers[id];
+    if (l && typeof l.setStyle === 'function') {
+      l.setStyle({
+        color: "#10b981",
+        fillColor: "#10b981",
+        weight: 2,
+        fillOpacity: 0.28,
+        className: "verified-field-path"
+      });
+      if (l._path) l._path.classList.remove("cinematic-field-selected");
     }
   });
 
@@ -1926,7 +2681,7 @@ function hideAnalyticsLoading() {
   }
 }
 
-// 6. Custom Polygon Analysis via GEE + ERA5 + ML
+// 6. Комплексный анализ полигона через GEE, ERA5 и ML-пайплайн
 async function analyzeCustomPolygon(field) {
   showAnalyticsLoading("Анализ контура через Google Earth Engine & ERA5", true);
   try {
@@ -1980,7 +2735,7 @@ async function analyzeCustomPolygon(field) {
   }
 }
 
-// Update Data Source attribution card
+// Обновление карточки источников спутниковых и метеорологических данных
 function updateDataSources(sources, fieldName) {
   const dsSat = document.getElementById("dsSatellite");
   const dsWeather = document.getElementById("dsWeather");
@@ -2000,7 +2755,7 @@ function updateDataSources(sources, fieldName) {
   }
 }
 
-// Toast notification
+// Всплывающее информационное уведомление (Toast)
 function showToast(msg, isError = false) {
   const toast = document.getElementById("appToast");
   const text = document.getElementById("toastMsg");
@@ -2011,7 +2766,7 @@ function showToast(msg, isError = false) {
   }, 4000);
 }
 
-// 7. Custom Field Modal (Naming & Color Customization)
+// 7. Модальное окно настройки поля (название и цвет)
 function initFieldModal() {
   const modal = document.getElementById("fieldModal");
   const nameInput = document.getElementById("fieldNameInput");
@@ -2021,7 +2776,7 @@ function initFieldModal() {
 
   if (!modal) return;
 
-  // Swatches listener
+  // Обработка клика по палитре предустановленных цветов
   const palette = document.getElementById("colorPaletteGroup");
   if (palette) {
     palette.querySelectorAll(".color-swatch-btn").forEach(btn => {
@@ -2031,7 +2786,7 @@ function initFieldModal() {
     });
   }
 
-  // Native color picker
+  // Выбор произвольного цвета через color picker
   const nativePicker = document.getElementById("nativeColorPicker");
   if (nativePicker) {
     nativePicker.addEventListener("input", (e) => {
@@ -2039,7 +2794,7 @@ function initFieldModal() {
     });
   }
 
-  // Save actions
+  // Сохранение изменений параметров поля
   saveBtn.addEventListener("click", () => {
     saveFieldFromModal();
   });
@@ -2051,7 +2806,7 @@ function initFieldModal() {
     }
   });
 
-  // Cancel actions
+  // Отмена изменений и закрытие окна
   cancelBtn.addEventListener("click", () => {
     if (currentModalContext) currentModalContext.cancelled = true;
     closeFieldModal();
@@ -2191,7 +2946,7 @@ function saveFieldFromModal() {
     activateAndAnalyzeField(fieldId);
     showToast(`Поле «${chosenName}» сохранено и принято в обработку!`);
   } else {
-    // Editing existing field
+    // Режим редактирования существующего поля
     const fieldId = currentModalContext.id;
     const field = userSavedFields[fieldId];
     if (field) {
@@ -2206,14 +2961,14 @@ function saveFieldFromModal() {
         renderGroupsInRegionSelect();
       }
 
-      // Update dropdown option text
+      // Обновление названия поля в выпадающем списке
       const select = document.getElementById("polygonSelect");
       const opt = select.querySelector(`option[value="${fieldId}"]`);
       if (opt) {
         opt.textContent = `● ${chosenName} (${field.areaHa.toFixed(1)} га)`;
       }
 
-      // Update layer style on map
+      // Обновление цвета и прозрачности полигона на карте
       if (field.layer && field.layer.setStyle) {
         field.layer.setStyle({
           color: chosenColor,
@@ -2223,7 +2978,7 @@ function saveFieldFromModal() {
         });
       }
 
-      // Update badge in data sources card
+      // Обновление плашки активного поля в карточке источников
       const badge = document.getElementById("activeFieldBadge");
       if (badge) badge.textContent = chosenName;
 
@@ -2234,7 +2989,7 @@ function saveFieldFromModal() {
   closeFieldModal();
 }
 
-// 8. Update KPIs
+// 8. Обновление ключевых агрономических показателей (KPI)
 function updateKPIs(kpis) {
   const statusEl = document.getElementById("statusText");
   const beaconEl = document.getElementById("statusIndicator");
@@ -2263,7 +3018,7 @@ function updateKPIs(kpis) {
   gapsEl.textContent = kpis.total_gaps_filled;
 }
 
-// Helper to get number of visible days currently shown on the x-axis scale
+// Расчет количества видимых дней на временной шкале графиков
 function getVisibleDays(ctx, defaultCount) {
   if (!ctx || !ctx.chart || !ctx.chart.scales || !ctx.chart.scales.x) return defaultCount;
   const x = ctx.chart.scales.x;
@@ -2273,7 +3028,7 @@ function getVisibleDays(ctx, defaultCount) {
   return defaultCount;
 }
 
-// Synchronize x-axis zoom/pan scale between NDVI and Weather charts
+// Синхронизация масштабирования шкалы дат между графиками NDVI и погоды
 function syncChartScales(sourceChart) {
   if (isSyncingScales) return;
   if (!sourceChart || !sourceChart.scales || !sourceChart.scales.x) return;
@@ -2288,7 +3043,7 @@ function syncChartScales(sourceChart) {
     if (target && target.scales && target.scales.x) {
       target.options.scales.x.min = min;
       target.options.scales.x.max = max;
-      target.update('none'); // immediate sync without animating
+      target.update('none'); // Мгновенная синхронизация без анимации задержки
     }
     updateDaysBadge(min, max);
   } finally {
@@ -2296,7 +3051,7 @@ function syncChartScales(sourceChart) {
   }
 }
 
-// Update the days badge in the chart header with current visible vs total days
+// Обновление бейджа с количеством отображаемых дней периода
 function updateDaysBadge(min, max) {
   if (!currentTimeseriesData || !currentTimeseriesData.length) return;
   const totalDays = currentTimeseriesData.length;
@@ -2320,7 +3075,7 @@ function updateDaysBadge(min, max) {
   }
 }
 
-// Reset both NDVI and Weather charts to the full date range
+// Сброс масштаба обоих графиков к исходному полному диапазону дат
 function resetBothChartsZoom() {
   isSyncingScales = true;
   try {
@@ -2352,7 +3107,7 @@ function resetBothChartsZoom() {
   }
 }
 
-// 9. Render Charts (Chart.js)
+// 9. Отрисовка графиков динамики NDVI и метеоусловий (Chart.js)
 function renderCharts(ts) {
   if (!ts || !ts.length) return;
   currentTimeseriesData = ts;
@@ -2377,7 +3132,7 @@ function renderCharts(ts) {
   const minObservedNdvi = allNdviVals.length > 0 ? Math.min(...allNdviVals) : 0.0;
   const yAxisMin = minObservedNdvi < -0.01 ? Math.max(-0.2, Math.floor((minObservedNdvi - 0.05) * 10) / 10) : 0.0;
 
-  // Determine span: multi-year or single-year
+  // Определение охвата периода: многолетний или в пределах одного года
   const multiYearSpan = ts.length > 0 && (ts[0].date.slice(0, 4) !== ts[ts.length - 1].date.slice(0, 4));
   const tickLimit = daysCount <= 15 ? daysCount : (daysCount <= 45 ? 15 : 12);
 
@@ -2391,7 +3146,7 @@ function renderCharts(ts) {
     return raw;
   };
 
-  // Zoom plugin detection and configuration
+  // Проверка наличия и настройка плагина масштабирования
   const hasZoomPlugin = typeof Chart !== 'undefined' && Chart.registry && !!Chart.registry.plugins.get('zoom');
   const zoomConfig = hasZoomPlugin ? {
     zoom: {
@@ -2418,7 +3173,7 @@ function renderCharts(ts) {
     }
   } : {};
 
-  // Responsive point radii based on visible days
+  // Адаптивный радиус точек наблюдений в зависимости от масштаба времени
   const getPointRadiusS2 = (ctx) => {
     const cnt = getVisibleDays(ctx, daysCount);
     return cnt <= 25 ? 6.5 : (cnt <= 60 ? 5 : (cnt <= 120 ? 4 : 3.2));
@@ -2517,12 +3272,14 @@ function renderCharts(ts) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: 'rgba(17, 24, 39, 0.95)',
-          titleFont: { family: 'JetBrains Mono', size: 12 },
-          bodyFont: { family: 'Inter', size: 12 },
-          borderColor: 'rgba(0, 240, 255, 0.3)',
-          borderWidth: 1,
-          padding: 10,
+          backgroundColor: 'rgba(15, 23, 42, 0.96)',
+          titleFont: { family: 'JetBrains Mono', size: 13.5, weight: 'bold' },
+          bodyFont: { family: 'Inter', size: 13, weight: '500' },
+          borderColor: 'rgba(0, 240, 255, 0.35)',
+          borderWidth: 1.5,
+          padding: 12,
+          boxPadding: 6,
+          usePointStyle: true,
           callbacks: {
             title: (items) => {
               if (!items || !items.length) return '';
@@ -2538,10 +3295,10 @@ function renderCharts(ts) {
       },
       scales: {
         x: {
-          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          grid: { color: 'rgba(255, 255, 255, 0.07)' },
           ticks: {
-            color: '#9ca3af',
-            font: { size: 11, family: 'JetBrains Mono' },
+            color: '#cbd5e1',
+            font: { size: 12.5, family: 'JetBrains Mono', weight: '500' },
             maxTicksLimit: tickLimit,
             callback: dateTickCallback
           }
@@ -2549,8 +3306,8 @@ function renderCharts(ts) {
         y: {
           min: yAxisMin,
           max: 1.0,
-          grid: { color: 'rgba(255, 255, 255, 0.05)' },
-          ticks: { color: '#9ca3af', font: { size: 11 } }
+          grid: { color: 'rgba(255, 255, 255, 0.07)' },
+          ticks: { color: '#cbd5e1', font: { size: 12.5, family: 'Inter', weight: '600' } }
         }
       }
     }
@@ -2594,12 +3351,14 @@ function renderCharts(ts) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: 'rgba(17, 24, 39, 0.95)',
-          titleFont: { family: 'JetBrains Mono', size: 12 },
-          bodyFont: { family: 'Inter', size: 12 },
-          borderColor: 'rgba(249, 115, 22, 0.3)',
-          borderWidth: 1,
-          padding: 10,
+          backgroundColor: 'rgba(15, 23, 42, 0.96)',
+          titleFont: { family: 'JetBrains Mono', size: 13.5, weight: 'bold' },
+          bodyFont: { family: 'Inter', size: 13, weight: '500' },
+          borderColor: 'rgba(249, 115, 22, 0.35)',
+          borderWidth: 1.5,
+          padding: 12,
+          boxPadding: 6,
+          usePointStyle: true,
           callbacks: {
             title: (items) => {
               if (!items || !items.length) return '';
@@ -2616,10 +3375,10 @@ function renderCharts(ts) {
       },
       scales: {
         x: {
-          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          grid: { color: 'rgba(255, 255, 255, 0.07)' },
           ticks: {
-            color: '#9ca3af',
-            font: { size: 11, family: 'JetBrains Mono' },
+            color: '#cbd5e1',
+            font: { size: 12.5, family: 'JetBrains Mono', weight: '500' },
             maxTicksLimit: tickLimit,
             callback: dateTickCallback
           }
@@ -2627,23 +3386,23 @@ function renderCharts(ts) {
         yTemp: {
           type: 'linear',
           position: 'left',
-          grid: { color: 'rgba(255, 255, 255, 0.05)' },
-          ticks: { color: '#f97316', font: { size: 10 } },
-          title: { display: true, text: 'T (°C)', color: '#f97316', font: { size: 10 } }
+          grid: { color: 'rgba(255, 255, 255, 0.07)' },
+          ticks: { color: '#fb923c', font: { size: 12, family: 'JetBrains Mono', weight: '600' } },
+          title: { display: true, text: 'T (°C)', color: '#fb923c', font: { size: 12.5, weight: 'bold' } }
         },
         yPrecip: {
           type: 'linear',
           position: 'right',
           grid: { display: false },
-          ticks: { color: '#38bdf8', font: { size: 10 } },
-          title: { display: true, text: 'Осадки (мм)', color: '#38bdf8', font: { size: 10 } }
+          ticks: { color: '#38bdf8', font: { size: 12, family: 'JetBrains Mono', weight: '600' } },
+          title: { display: true, text: 'Осадки (мм)', color: '#38bdf8', font: { size: 12.5, weight: 'bold' } }
         }
       }
     }
   });
 }
 
-// 10. Render Anomalies
+// 10. Отображение карточек выявленных аномалий и рекомендаций
 function renderAnomalies(anomalies) {
   const container = document.getElementById("anomaliesList");
   container.innerHTML = "";
@@ -2682,20 +3441,6 @@ function renderAnomalies(anomalies) {
   });
 }
 
-// 11. Load Batch Status
-async function loadBatchStatus() {
-  try {
-    const resp = await fetch("/api/batch-status");
-    const data = await resp.json();
-    if (data.status === "ready") {
-      document.getElementById("batchRowCount").textContent = `${data.rows_count.toLocaleString()} строк`;
-      document.getElementById("batchPolyCount").textContent = `${data.polygons_count} полигонов`;
-      document.getElementById("batchMeanNdvi").textContent = `${data.mean_predicted_ndvi} (min: ${data.min_predicted_ndvi}, max: ${data.max_predicted_ndvi})`;
-    }
-  } catch (e) {
-    console.error("Ошибка получения статуса батча:", e);
-  }
-}
 
 // ============================================================================
 // 12. АГРОНОМИЧЕСКИЙ ПАСПОРТ ПОЛЯ // ГЕНЕРАЦИЯ, ПЕЧАТЬ В PDF И ЭКСПОРТ (GEOJSON/CSV)
@@ -3065,3 +3810,25 @@ async function exportPassportCsv() {
     showToast("Не удалось экспортировать CSV. Проверьте соединение с сервером.", true);
   }
 }
+
+// ============================================================================
+// 13. ДИНАМИЧЕСКИЙ РАЗМЕР СТРАНИЦЫ И АВТОМАТИЧЕСКАЯ АДАПТАЦИЯ КАРТЫ И ГРАФИКОВ
+// Синхронизирует габариты Leaflet и холстов Chart.js при приближении/отдалении страницы (Ctrl+/-)
+// ============================================================================
+let windowResizeDebounceTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(windowResizeDebounceTimer);
+  windowResizeDebounceTimer = setTimeout(() => {
+    // Инвалидация и пересчет тайлов карты без скачков и сдвигов
+    if (typeof map !== 'undefined' && map && typeof map.invalidateSize === 'function') {
+      map.invalidateSize({ animate: false });
+    }
+    // Пересчет габаритов графиков вегетации и метеоусловий
+    if (typeof ndviChartInstance !== 'undefined' && ndviChartInstance && typeof ndviChartInstance.resize === 'function') {
+      ndviChartInstance.resize();
+    }
+    if (typeof weatherChartInstance !== 'undefined' && weatherChartInstance && typeof weatherChartInstance.resize === 'function') {
+      weatherChartInstance.resize();
+    }
+  }, 120);
+});

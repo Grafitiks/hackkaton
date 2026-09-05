@@ -1,8 +1,6 @@
-version: '3.8'
-
 # ============================================================================
-# ДЕМОНСТРАЦИОННЫЙ ЗАПУСК ДЛЯ ЖЮРИ ХАКАТОНА ОДНОЙ КОМАНДОЙ:
-#   docker compose up --build
+# ДЕМОНСТРАЦИОННЫЙ ЗАПУСК ДЛЯ СЕРВЕРА И ЖЮРИ ХАКАТОНА ОДНОЙ КОМАНДОЙ:
+#   docker compose up -d --build
 # ============================================================================
 
 services:
@@ -13,13 +11,19 @@ services:
     container_name: geo-vega-dashboard
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:8000"
     environment:
       - PYTHONUNBUFFERED=1
       - PORT=8000
       - HOST=0.0.0.0
+      - PRODUCTION=1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/batch-status"]
       interval: 30s
       timeout: 5s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -8,14 +8,14 @@ df_test = pd.read_csv("data/private_features.csv", encoding='utf-8')
 df_test['date_dt'] = pd.to_datetime(df_test['date'])
 df_test['year'] = df_test['date_dt'].dt.year
 
-# Let's inspect for each polygon how primary_ndvi is distributed
+# Анализ распределения наблюдений primary_ndvi для каждого полигона
 distances_prev = []
 distances_next = []
 
 for poly_id, group in df_test.groupby('anon_polygon_id'):
     group = group.sort_values('date_dt').copy()
     
-    # We want to know: among the dates where primary_ndvi is known (not NaN and is_synthetic_gap == False)
+    # Анализ временных интервалов между известными точками (не NaN и is_synthetic_gap == False)
     known_idx = group[group['primary_ndvi'].notna()].index
     known_dates = group.loc[known_idx, 'date_dt'].values
     
@@ -24,7 +24,7 @@ for poly_id, group in df_test.groupby('anon_polygon_id'):
         g_date = row['date_dt']
         g_year = row['year']
         
-        # Previous known date in same year or overall
+        # Предыдущая известная дата в рамках того же года или всего ряда
         prev_dates = known_dates[known_dates < np.datetime64(g_date)]
         next_dates = known_dates[known_dates > np.datetime64(g_date)]
         

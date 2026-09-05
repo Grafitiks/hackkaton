@@ -1,7 +1,7 @@
 import sys
 import os
 
-# Fix Windows console encoding
+# Настройка кодировки UTF-8 для вывода в консоль Windows
 sys.stdout.reconfigure(encoding='utf-8')
 
 print("==================================================")
@@ -17,12 +17,12 @@ except ImportError:
 
 PROJECT_ID = "ee-agro-hackathon"
 
-# 1. Check if already authenticated
+# 1. Проверка существующей авторизации
 try:
     ee.Initialize(project=PROJECT_ID)
     print(f"\n[УСПЕХ] Google Earth Engine уже авторизован (проект: {PROJECT_ID}) и готов к работе!")
     
-    # Test query Sentinel-2
+    # Тестовый запрос коллекции снимков Sentinel-2
     point = ee.Geometry.Point([50.2, 53.2])
     s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED').filterBounds(point).filterDate('2024-06-01', '2024-06-30').first()
     info = s2.getInfo()
@@ -33,7 +33,7 @@ except Exception as e:
     print(f"\nТребуется авторизация учетной записи Google Earth Engine.")
     print("Сейчас запустится мастер авторизации Google...")
 
-# 2. Run interactive authentication
+# 2. Запуск интерактивной авторизации Google Earth Engine
 try:
     ee.Authenticate()
     print("\nАвторизация в браузере пройдена. Инициализация...")

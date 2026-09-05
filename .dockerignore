@@ -12,3 +12,9 @@ env
 .venv
 *.log
 scratch/
+.gemini/
+.user_uploaded/
+*.tar.gz
+*.zip
+.DS_Store
+Thumbs.db

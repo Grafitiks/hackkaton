@@ -11,7 +11,7 @@ print(f"Test shape: {df_test.shape}")
 print(f"Train unique polygons: {df_train['anon_polygon_id'].nunique()}")
 print(f"Test unique polygons: {df_test['anon_polygon_id'].nunique()}")
 
-# Overlap of polygons between train and test
+# Пересечение множеств полигонов между обучающей и тестовой выборками
 train_polys = set(df_train['anon_polygon_id'].unique())
 test_polys = set(df_test['anon_polygon_id'].unique())
 print(f"Polygons in both train and test: {len(train_polys.intersection(test_polys))}")

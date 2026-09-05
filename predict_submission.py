@@ -11,7 +11,17 @@ from src.models.inference import predict_gaps
 
 def main():
     parser = argparse.ArgumentParser(description="Космохакатон: Batch-инференс восстановления primary_ndvi")
-    parser.add_argument("--input", default="data/private_features.csv", help="Путь к тестовому файлу (private_features.csv)")
+    
+    # Автоопределение пути к тестовому датасету
+    candidates = [
+        "data/test_features (1).csv",
+        "data/test_features.csv",
+        "data/private_features.csv",
+        "test_features (1).csv"
+    ]
+    detected_input = next((c for c in candidates if os.path.exists(c)), "data/test_features (1).csv")
+    
+    parser.add_argument("--input", default=detected_input, help="Путь к тестовому файлу")
     parser.add_argument("--output", default="submission.csv", help="Путь для сохранения итогового submission.csv")
     parser.add_argument("--model", default="artifacts/models/ensemble_models.pkl", help="Путь к артефакту моделей")
     parser.add_argument("--clim", default="artifacts/models/climatology.pkl", help="Путь к артефакту климатологии")
@@ -34,6 +44,7 @@ def main():
     sub = predict_gaps(args.input, args.model, args.clim)
     
     # Контрольная верификация формата submission.csv по требованиям регламента
+    sub = sub[['date', 'primary_ndvi_true', 'anon_polygon_id']]
     print("\n--- Проверка формата submission.csv ---")
     print(f"Строк в итоговом датасете: {len(sub)}")
     print(f"Колонки: {list(sub.columns)}")
